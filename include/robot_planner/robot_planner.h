@@ -57,6 +57,18 @@ struct JointTrajectory {
     }
 };
 
+/**
+ * @brief 碰撞与接触几何信息结构体 (仅由标准基础类型构成)
+ */
+struct ContactInfo {
+    std::string link_name1;         // 发生接触的连杆/物体1
+    std::string link_name2;         // 发生接触的连杆/物体2
+    double distance{0.0};           // 距离 (负值表示侵入深度，正值表示净空安全裕度) [m]
+    std::vector<double> point1;     // 物体1上的接触点世界坐标 [x, y, z]
+    std::vector<double> point2;     // 物体2上的接触点世界坐标 [x, y, z]
+    std::vector<double> normal;     // 接触法向量 [nx, ny, nz] (指向物体2)
+};
+
 class RobotPlanner {
 public:
     RobotPlanner();
@@ -100,12 +112,21 @@ public:
     // ---------------------------------------------------------
 
     /**
-     * @brief 正向运动学 (FK)
+     * @brief 正向运动学 (FK, 计算默认 tool_link 末端位姿)
      * @param joint_angles 关节角度向量 [rad]
      * @param pose_out 输出末端位姿 [x, y, z, qx, qy, qz, qw]
      * @return 成功返回 true
      */
     bool computeFK(const std::vector<double>& joint_angles, std::vector<double>& pose_out);
+
+    /**
+     * @brief 正向运动学 (FK, 计算任意指定连杆的世界位姿)
+     * @param joint_angles 关节角度向量 [rad]
+     * @param link_name 目标连杆名称 (如 "link_3", "link_5", "tool0")
+     * @param pose_out 输出指定连杆位姿 [x, y, z, qx, qy, qz, qw]
+     * @return 成功返回 true
+     */
+    bool computeFKForLink(const std::vector<double>& joint_angles, const std::string& link_name, std::vector<double>& pose_out);
 
     /**
      * @brief 逆向运动学 (IK, 自动经过 URDF 物理限位过滤)
@@ -125,11 +146,51 @@ public:
     bool computeAllIK(const std::vector<double>& pose, std::vector<std::vector<double>>& all_solutions_out);
 
     /**
-     * @brief 关节状态碰撞检测
+     * @brief 计算指定关节状态下末端或指定连杆的 6xN 几何雅可比矩阵
+     * @param joint_angles 关节角度 [rad]
+     * @param jacobian_out 输出扁平数组 (大小 6 * N，行优先排列)
+     * @param link_name 目标连杆名称 (传空字符串则默认为 tool_link)
+     * @return 成功返回 true
+     */
+    bool calcJacobian(const std::vector<double>& joint_angles, std::vector<double>& jacobian_out, const std::string& link_name = "");
+
+    /**
+     * @brief 计算吉川可操作度指标 (Yoshikawa Manipulability Index)
+     * @details 标量度量 w = sqrt(det(J * J^T))。接近 0 说明处于或临近奇异构型。
+     * @param joint_angles 关节角度 [rad]
+     * @param score_out 输出可操作度指标
+     * @return 成功返回 true
+     */
+    bool computeManipulability(const std::vector<double>& joint_angles, double& score_out);
+
+    /**
+     * @brief 关节状态碰撞检测 (发生碰撞时 getLastError 会包含具体冲突连杆信息)
      * @param joint_angles 需要检测的关节状态
      * @return 发生碰撞返回 true，安全无碰撞返回 false
      */
     bool checkCollision(const std::vector<double>& joint_angles);
+
+    /**
+     * @brief 查询指定关节状态下的所有碰撞/接触对详细几何信息 (带接触点与法向量)
+     * @param joint_angles 关节角度 [rad]
+     * @param contacts_out 输出的所有接触/碰撞详细信息
+     * @param contact_distance 接触判定阈值 (米，<=0 仅返回发生干涉的对，>0 返回小于该安全净距的近邻对)
+     * @return 存在干涉或小于安全裕度时返回 true
+     */
+    bool checkCollisionDetailed(const std::vector<double>& joint_angles, 
+                                std::vector<ContactInfo>& contacts_out, 
+                                double contact_distance = 0.0);
+
+    /**
+     * @brief 独立轨迹全量合规性质检器 (物理软硬限位、速度超限、加速度超限、时间戳单调性、全轨碰撞)
+     * @param trajectory 需要质检的完整轨迹 (在 VAMP 模式下利用 AVX2 SIMD 微秒级并行质检)
+     * @param failed_waypoint_index [可选输出] 首个违规的路径点序号 (0-indexed)
+     * @param reason [可选输出] 违规的具体详细说明
+     * @return 全部合规返回 true，任一条件违规返回 false
+     */
+    bool validateTrajectory(const JointTrajectory& trajectory, 
+                            int* failed_waypoint_index = nullptr, 
+                            std::string* reason = nullptr);
 
     // ---------------------------------------------------------
     // 场景与障碍物全生命周期管理 (Scene & Obstacles)
@@ -143,6 +204,37 @@ public:
      * @return 成功返回 true
      */
     bool addBox(const std::string& name, double x, double y, double z, double dim_x, double dim_y, double dim_z);
+
+    /**
+     * @brief 在场景中添加球体 (Sphere) 障碍物
+     * @param name 障碍物唯一名称
+     * @param x, y, z 球心位置 (米)
+     * @param radius 球半径 (米)
+     * @return 成功返回 true
+     */
+    bool addSphere(const std::string& name, double x, double y, double z, double radius);
+
+    /**
+     * @brief 在场景中添加圆柱体 (Cylinder) 障碍物
+     * @param name 障碍物唯一名称
+     * @param radius 圆柱半径 (米)
+     * @param length 圆柱长度/高度 (米)
+     * @param pose 位姿 [x, y, z, qx, qy, qz, qw]
+     * @return 成功返回 true
+     */
+    bool addCylinder(const std::string& name, double radius, double length, 
+                    const std::vector<double>& pose = {0,0,0, 0,0,0,1});
+
+    /**
+     * @brief 在场景中添加胶囊体 (Capsule) 障碍物
+     * @param name 障碍物唯一名称
+     * @param radius 胶囊体两端半球及圆柱半径 (米)
+     * @param length 胶囊体圆柱段长度 (米)
+     * @param pose 位姿 [x, y, z, qx, qy, qz, qw]
+     * @return 成功返回 true
+     */
+    bool addCapsule(const std::string& name, double radius, double length, 
+                   const std::vector<double>& pose = {0,0,0, 0,0,0,1});
 
     /**
      * @brief 在场景中添加网格模型 (Mesh) 障碍物
@@ -169,6 +261,20 @@ public:
                        const std::vector<double>& points,
                        double resolution = 0.01,
                        const std::vector<double>& pose = {0,0,0, 0,0,0,1});
+
+    /**
+     * @brief 设置两个连杆/障碍物之间是否允许碰撞 (允许碰撞矩阵 ACM 白名单/黑名单)
+     * @param link1 连杆或障碍物名称
+     * @param link2 连杆或障碍物名称
+     * @param allowed true 为允许碰触 (忽略干涉)，false 为恢复常规干涉检测
+     * @return 成功返回 true
+     */
+    bool setAllowedCollision(const std::string& link1, const std::string& link2, bool allowed);
+
+    /**
+     * @brief 查询两个连杆/障碍物之间是否处于允许碰撞白名单中
+     */
+    bool isCollisionAllowed(const std::string& link1, const std::string& link2) const;
 
     /**
      * @brief 移除场景中的障碍物

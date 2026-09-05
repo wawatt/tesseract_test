@@ -58,7 +58,11 @@ set(TESSERACT_VCPKG_PREFIX "${VCPKG_INSTALLED_DIR}/x64-windows")
 set(TESSERACT_TEST_SHARE_DIR "${TESSERACT_VCPKG_PREFIX}/share")
 
 add_library(robot_planner STATIC
-  src/robot_planner.cpp
+  src/robot_planner/robot_planner_init.cpp
+  src/robot_planner/robot_planner_kinematics.cpp
+  src/robot_planner/robot_planner_scene.cpp
+  src/robot_planner/robot_planner_collision.cpp
+  src/robot_planner/robot_planner_motion.cpp
 )
 
 add_library(${PROJECT_NAME} STATIC
@@ -91,7 +95,8 @@ target_link_libraries(
   PRIVATE ${PCL_LIBRARIES})
 
 target_include_directories(robot_planner PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
-                                                  "$<INSTALL_INTERFACE:include>")
+                                                  "$<INSTALL_INTERFACE:include>"
+                                         PRIVATE "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/robot_planner>")
 
 target_link_libraries(
   ${PROJECT_NAME}
