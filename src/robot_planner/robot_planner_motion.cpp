@@ -62,18 +62,26 @@ bool RobotPlanner::planFreespace(const std::vector<double>& start_joints,
     }
 
     auto t_pipe_0 = std::chrono::high_resolution_clock::now();
-    double vamp_ms = 0.0;
 
-    // 步骤 1: OMPL(vamp) 全局避障寻路
-    std::vector<std::vector<double>> seed_trajectory;
-    bool vamp_ok = false;
+    // 步骤 1: VAMP cuRobo-style 全管线 (OMPL/PRM -> B-Spline L-BFGS -> TOPP-RA)
     if (pimpl_->backend_ == PlannerBackend::VAMP && pimpl_->vamp_loader_ && start_joints.size() == 6) {
         auto t_v0 = std::chrono::high_resolution_clock::now();
-        vamp_ok = pimpl_->vamp_loader_->planFreespace(start_joints, target_joints, seed_trajectory,
-                                                      planning_time, range, safety_margin, planner_type);
+        bool traj_ok = pimpl_->vamp_loader_->planTrajectory(start_joints, target_joints, trajectory_out,
+                                                            max_velocity_scaling, max_acceleration_scaling,
+                                                            planning_time, range, safety_margin, planner_type);
         auto t_v1 = std::chrono::high_resolution_clock::now();
-        vamp_ms = std::chrono::duration<double, std::milli>(t_v1 - t_v0).count();
+        double vamp_ms = std::chrono::duration<double, std::milli>(t_v1 - t_v0).count();
+        if (traj_ok && !trajectory_out.empty()) {
+            std::cout << "[RobotPlanner] cuRobo VAMP Pipeline (PRM -> B-Spline L-BFGS -> TOPP-RA ["
+                      << vamp_ms << " ms]) SUCCESS! (Points: " << trajectory_out.positions.size() << ")" << std::endl;
+            pimpl_->setLastError(PlannerStatus::SUCCESS, "");
+            return true;
+        }
     }
+
+    double vamp_ms = 0.0;
+    std::vector<std::vector<double>> seed_trajectory;
+    bool vamp_ok = false;
 
     // 步骤 2 & 3: TrajOpt smoothing -> Time Parameterization
     tesseract::common::ManipulatorInfo manip_info(pimpl_->manipulator_name_, pimpl_->base_link_, pimpl_->tool_link_);

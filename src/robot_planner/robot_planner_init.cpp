@@ -123,6 +123,7 @@ bool RobotPlanner::init(const std::string& urdf_path, const std::string& srdf_pa
         if (pimpl_->vamp_loader_->load(custom_plugin_path, robot_name)) {
             pimpl_->backend_ = PlannerBackend::VAMP;
             pimpl_->vamp_loader_->setJointOrigins(pimpl_->joint_origins_xyz_, pimpl_->joint_origins_rpy_, pimpl_->joint_axes_xyz_);
+            pimpl_->vamp_loader_->setLimits(pimpl_->joint_vel_limits_, pimpl_->joint_acc_limits_);
             std::cout << "[RobotPlanner] VAMP Backend activated (AVX2 SIMD, URDF dynamic joint origins injected) -> "
                       << pimpl_->vamp_loader_->getResolvedPath() << std::endl;
         } else {

@@ -43,6 +43,19 @@ int vamp_r2000ic_set_joint_origins(VampPlannerHandle handle,
     }
 }
 
+int vamp_r2000ic_set_limits(VampPlannerHandle handle,
+                            const double* vel_limits,
+                            const double* acc_limits) {
+    if (!handle || !vel_limits || !acc_limits) return 0;
+    auto* planner = static_cast<vamp_r2000ic::VampR2000icPlanner*>(handle);
+    try {
+        planner->setLimits(vel_limits, acc_limits);
+        return 1;
+    } catch (...) {
+        return 0;
+    }
+}
+
 int vamp_r2000ic_add_box(VampPlannerHandle handle,
                          const char* name,
                          double x, double y, double z,
@@ -136,6 +149,58 @@ int vamp_r2000ic_plan_freespace(VampPlannerHandle handle,
             for (int j = 0; j < 6; ++j) {
                 out_trajectory[i * 6 + j] = trajectory[i][j];
             }
+        }
+        *out_num_points = count;
+        return 1;
+    } catch (...) {
+        *out_num_points = 0;
+        return 0;
+    }
+}
+
+int vamp_r2000ic_plan_trajectory(VampPlannerHandle handle,
+                                 const double* start_joints_6,
+                                 const double* goal_joints_6,
+                                 double* out_positions,
+                                 double* out_velocities,
+                                 double* out_accelerations,
+                                 double* out_time_stamps,
+                                 int* out_num_points,
+                                 int max_points,
+                                 double max_vel_scaling,
+                                 double max_acc_scaling,
+                                 double timeout,
+                                 double step_size,
+                                 double margin,
+                                 const char* planner_type) {
+    if (!handle || !start_joints_6 || !goal_joints_6 || !out_positions || !out_time_stamps || !out_num_points || max_points <= 0) {
+        return 0;
+    }
+    auto* planner = static_cast<vamp_r2000ic::VampR2000icPlanner*>(handle);
+    try {
+        std::vector<double> start_q(start_joints_6, start_joints_6 + 6);
+        std::vector<double> goal_q(goal_joints_6, goal_joints_6 + 6);
+        vamp_r2000ic::TimedTrajectory traj;
+        std::string ptype = planner_type ? std::string(planner_type) : "PRM";
+
+        bool ok = planner->planTrajectory(start_q, goal_q, traj, max_vel_scaling, max_acc_scaling, timeout, step_size, margin, ptype);
+        if (!ok || traj.empty()) {
+            *out_num_points = 0;
+            return 0;
+        }
+
+        int count = std::min(static_cast<int>(traj.positions.size()), max_points);
+        for (int i = 0; i < count; ++i) {
+            for (int j = 0; j < 6; ++j) {
+                out_positions[i * 6 + j] = traj.positions[i][j];
+                if (out_velocities && i < static_cast<int>(traj.velocities.size())) {
+                    out_velocities[i * 6 + j] = traj.velocities[i][j];
+                }
+                if (out_accelerations && i < static_cast<int>(traj.accelerations.size())) {
+                    out_accelerations[i * 6 + j] = traj.accelerations[i][j];
+                }
+            }
+            out_time_stamps[i] = traj.time_stamps[i];
         }
         *out_num_points = count;
         return 1;

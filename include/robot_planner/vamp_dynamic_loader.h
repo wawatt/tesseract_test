@@ -4,6 +4,7 @@
 #include <vector>
 #include <iostream>
 #include <algorithm>
+#include "robot_planner.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -27,7 +28,9 @@ public:
     typedef int (*FnRemoveObstacle)(void*, const char*);
     typedef int (*FnCheckCollision)(void*, const double*);
     typedef int (*FnPlanFreespace)(void*, const double*, const double*, double*, int*, int, double, double, double, const char*);
+    typedef int (*FnPlanTrajectory)(void*, const double*, const double*, double*, double*, double*, double*, int*, int, double, double, double, double, double, const char*);
     typedef int (*FnSetJointOrigins)(void*, const double*, const double*, const double*);
+    typedef int (*FnSetLimits)(void*, const double*, const double*);
     typedef int (*FnWarmupRoadmap)(void*, double);
     typedef int (*FnAddAttachedSpheres)(void*, const char*, int, const double*, int);
     typedef int (*FnRemoveAttachedSpheres)(void*, const char*);
@@ -109,7 +112,9 @@ public:
         fnRemoveObstacle_ = (FnRemoveObstacle)GetProcAddress(hModule_, "vamp_r2000ic_remove_obstacle");
         fnCheckCollision_ = (FnCheckCollision)GetProcAddress(hModule_, "vamp_r2000ic_check_collision");
         fnPlanFreespace_ = (FnPlanFreespace)GetProcAddress(hModule_, "vamp_r2000ic_plan_freespace");
+        fnPlanTrajectory_ = (FnPlanTrajectory)GetProcAddress(hModule_, "vamp_r2000ic_plan_trajectory");
         fnSetJointOrigins_ = (FnSetJointOrigins)GetProcAddress(hModule_, "vamp_r2000ic_set_joint_origins");
+        fnSetLimits_ = (FnSetLimits)GetProcAddress(hModule_, "vamp_r2000ic_set_limits");
         fnWarmupRoadmap_ = (FnWarmupRoadmap)GetProcAddress(hModule_, "vamp_r2000ic_warmup_roadmap");
         fnAddAttachedSpheres_ = (FnAddAttachedSpheres)GetProcAddress(hModule_, "vamp_r2000ic_add_attached_spheres");
         fnRemoveAttachedSpheres_ = (FnRemoveAttachedSpheres)GetProcAddress(hModule_, "vamp_r2000ic_remove_attached_spheres");
@@ -153,6 +158,7 @@ public:
         fnRemoveObstacle_ = nullptr;
         fnCheckCollision_ = nullptr;
         fnPlanFreespace_ = nullptr;
+        fnPlanTrajectory_ = nullptr;
         fnSetJointOrigins_ = nullptr;
         fnWarmupRoadmap_ = nullptr;
         fnAddAttachedSpheres_ = nullptr;
@@ -197,6 +203,11 @@ public:
     bool warmupRoadmap(double warmup_time = 0.3) {
         if (!isLoaded() || !fnWarmupRoadmap_) return false;
         return fnWarmupRoadmap_(handle_, warmup_time) == 1;
+    }
+
+    bool setLimits(const std::vector<double>& vel_limits, const std::vector<double>& acc_limits) {
+        if (!isLoaded() || !fnSetLimits_ || vel_limits.size() < 6 || acc_limits.size() < 6) return false;
+        return fnSetLimits_(handle_, vel_limits.data(), acc_limits.data()) == 1;
     }
 
     bool addAttachedSpheres(const std::string& name, int link_index, const double* spheres_xyzr, int sphere_count) {
@@ -245,6 +256,52 @@ public:
         return true;
     }
 
+    bool planTrajectory(const std::vector<double>& start,
+                        const std::vector<double>& goal,
+                        JointTrajectory& trajectory_out,
+                        double max_vel_scaling = 1.0,
+                        double max_acc_scaling = 1.0,
+                        double timeout = 5.0,
+                        double step_size = 0.02,
+                        double margin = 0.025,
+                        const std::string& planner_type = "PRM") {
+        trajectory_out.clear();
+        if (!isLoaded() || !fnPlanTrajectory_ || start.size() < 6 || goal.size() < 6) {
+            return false;
+        }
+
+        const int MAX_POINTS = 5000;
+        std::vector<double> buf_pos(MAX_POINTS * 6);
+        std::vector<double> buf_vel(MAX_POINTS * 6);
+        std::vector<double> buf_acc(MAX_POINTS * 6);
+        std::vector<double> buf_time(MAX_POINTS);
+        int num_points = 0;
+
+        int ret = fnPlanTrajectory_(handle_, start.data(), goal.data(),
+                                   buf_pos.data(), buf_vel.data(), buf_acc.data(), buf_time.data(),
+                                   &num_points, MAX_POINTS,
+                                   max_vel_scaling, max_acc_scaling,
+                                   timeout, step_size, margin, planner_type.c_str());
+        if (ret != 1 || num_points <= 0) {
+            return false;
+        }
+
+        trajectory_out.positions.resize(num_points, std::vector<double>(6));
+        trajectory_out.velocities.resize(num_points, std::vector<double>(6));
+        trajectory_out.accelerations.resize(num_points, std::vector<double>(6));
+        trajectory_out.time_stamps.resize(num_points);
+
+        for (int i = 0; i < num_points; ++i) {
+            for (int j = 0; j < 6; ++j) {
+                trajectory_out.positions[i][j] = buf_pos[i * 6 + j];
+                trajectory_out.velocities[i][j] = buf_vel[i * 6 + j];
+                trajectory_out.accelerations[i][j] = buf_acc[i * 6 + j];
+            }
+            trajectory_out.time_stamps[i] = buf_time[i];
+        }
+        return true;
+    }
+
 private:
 #ifdef _WIN32
     HMODULE hModule_ = nullptr;
@@ -260,7 +317,9 @@ private:
     FnRemoveObstacle fnRemoveObstacle_ = nullptr;
     FnCheckCollision fnCheckCollision_ = nullptr;
     FnPlanFreespace fnPlanFreespace_ = nullptr;
+    FnPlanTrajectory fnPlanTrajectory_ = nullptr;
     FnSetJointOrigins fnSetJointOrigins_ = nullptr;
+    FnSetLimits fnSetLimits_ = nullptr;
     FnWarmupRoadmap fnWarmupRoadmap_ = nullptr;
     FnAddAttachedSpheres fnAddAttachedSpheres_ = nullptr;
     FnRemoveAttachedSpheres fnRemoveAttachedSpheres_ = nullptr;

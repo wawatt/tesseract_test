@@ -141,6 +141,18 @@ public:
         return kinematics_;
     }
 
+    const std::vector<AABB>& getFlatBoxes() const {
+        return flat_boxes_;
+    }
+
+    const std::unordered_map<std::string, Sphere>& getSpheres() const {
+        return spheres_;
+    }
+
+    const std::vector<std::pair<int, int>>& getActiveSelfCollisionPairs() const {
+        return active_self_collision_pairs_;
+    }
+
     size_t getNumBoxes() const {
         return flat_boxes_.size();
     }

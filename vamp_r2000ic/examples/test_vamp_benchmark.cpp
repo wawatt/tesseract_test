@@ -106,6 +106,27 @@ int main(int argc, char** argv) {
         std::cerr << "  -> RRT* Planning failed!" << std::endl;
     }
 
+    // -------------------------------------------------------------
+    // 5. cuRobo Full Pipeline: PRM -> B-Spline + L-BFGS -> TOPP-RA
+    // -------------------------------------------------------------
+    std::cout << "\n[5] cuRobo Pipeline (PRM -> B-Spline L-BFGS -> TOPP-RA)..." << std::endl;
+    vamp_r2000ic::TimedTrajectory timed_traj;
+    auto t_curobo0 = std::chrono::high_resolution_clock::now();
+    bool ok_curobo = planner.planTrajectory(start_q, goal_q, timed_traj, 1.0, 1.0, 5.0, 0.02, 0.025, "PRM");
+    auto t_curobo1 = std::chrono::high_resolution_clock::now();
+    double curobo_ms = std::chrono::duration<double, std::milli>(t_curobo1 - t_curobo0).count();
+
+    if (ok_curobo) {
+        std::cout << "  -> cuRobo Pipeline succeeded in: " << curobo_ms << " ms" << std::endl;
+        std::cout << "  -> Trajectory points: " << timed_traj.size() 
+                  << ", Duration: " << (timed_traj.empty() ? 0.0 : timed_traj.time_stamps.back()) << " s" << std::endl;
+        if (!timed_traj.empty()) {
+            std::cout << "  -> Start vel: " << timed_traj.velocities.front()[0] << ", End vel: " << timed_traj.velocities.back()[0] << std::endl;
+        }
+    } else {
+        std::cerr << "  -> cuRobo Pipeline failed!" << std::endl;
+    }
+
     std::cout << "\nBenchmark completed successfully!" << std::endl;
     return 0;
 }

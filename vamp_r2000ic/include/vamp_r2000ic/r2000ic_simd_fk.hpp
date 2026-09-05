@@ -239,6 +239,18 @@ public:
         return local_spheres_;
     }
 
+    const std::unordered_map<std::string, std::vector<LocalSphere>>& getAttachedSpheres() const {
+        return attached_spheres_;
+    }
+
+    const std::array<Transform4, NUM_JOINTS>& getOriginTransforms() const {
+        return origin_transforms_;
+    }
+
+    const std::array<Point3, NUM_JOINTS>& getAxes() const {
+        return axes_;
+    }
+
 private:
     std::vector<LocalSphere> local_spheres_;
     std::unordered_map<std::string, std::vector<LocalSphere>> attached_spheres_;

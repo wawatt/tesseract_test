@@ -1,5 +1,6 @@
 #include "vamp_r2000ic/vamp_r2000ic_planner.hpp"
 #include "vamp_r2000ic/vamp_ompl_adapter.hpp"
+#include "vamp_r2000ic/vamp_bspline_optimizer.hpp"
 
 #include <ompl/geometric/SimpleSetup.h>
 #include <ompl/geometric/planners/rrt/RRTConnect.h>
@@ -23,30 +24,46 @@ struct VampR2000icPlanner::Impl {
     bool roadmap_warmed_ = false;
     float current_safety_margin_ = 0.025f;
     double current_range_ = 0.02;
+    std::vector<double> vel_limits_{ 2.2689, 2.0071, 2.1817, 3.8397, 3.8397, 5.5851 };
+    std::vector<double> acc_limits_{ 6.0, 5.0, 6.0, 10.0, 10.0, 15.0 };
 };
 
 VampR2000icPlanner::VampR2000icPlanner() : pimpl_(std::make_unique<Impl>()) {}
 VampR2000icPlanner::~VampR2000icPlanner() = default;
 
-bool VampR2000icPlanner::init() {
-    pimpl_->space_ = createR2000icStateSpace();
-    pimpl_->si_ = std::make_shared<ompl::base::SpaceInformation>(pimpl_->space_);
-    pimpl_->checker_adapter_ = std::make_shared<VampStateValidityChecker>(pimpl_->si_, pimpl_->checker_, pimpl_->current_safety_margin_);
-    pimpl_->validator_adapter_ = std::make_shared<VampMotionValidator>(pimpl_->si_, pimpl_->checker_, pimpl_->current_safety_margin_, pimpl_->current_range_);
-
-    pimpl_->si_->setStateValidityChecker(pimpl_->checker_adapter_);
-    pimpl_->si_->setMotionValidator(pimpl_->validator_adapter_);
-    pimpl_->si_->setup();
-
-    // Initialize persistent PRM planner
-    pimpl_->persistent_prm_ = std::make_shared<ompl::geometric::PRM>(pimpl_->si_);
-    pimpl_->pdef_ = std::make_shared<ompl::base::ProblemDefinition>(pimpl_->si_);
-    pimpl_->persistent_prm_->setProblemDefinition(pimpl_->pdef_);
-    pimpl_->persistent_prm_->setup();
-
-    pimpl_->initialized_ = true;
-    return true;
+void VampR2000icPlanner::setLimits(const double vel_limits[6], const double acc_limits[6]) {
+    if (vel_limits) pimpl_->vel_limits_.assign(vel_limits, vel_limits + 6);
+    if (acc_limits) pimpl_->acc_limits_.assign(acc_limits, acc_limits + 6);
 }
+
+bool VampR2000icPlanner::init() {
+    try {
+        pimpl_->space_ = createR2000icStateSpace();
+        pimpl_->si_ = std::make_shared<ompl::base::SpaceInformation>(pimpl_->space_);
+        pimpl_->checker_adapter_ = std::make_shared<VampStateValidityChecker>(pimpl_->si_, pimpl_->checker_, pimpl_->current_safety_margin_);
+        pimpl_->validator_adapter_ = std::make_shared<VampMotionValidator>(pimpl_->si_, pimpl_->checker_, pimpl_->current_safety_margin_, pimpl_->current_range_);
+
+        pimpl_->si_->setStateValidityChecker(pimpl_->checker_adapter_);
+        pimpl_->si_->setMotionValidator(pimpl_->validator_adapter_);
+        pimpl_->si_->setup();
+
+        // Initialize persistent PRM planner
+        pimpl_->persistent_prm_ = std::make_shared<ompl::geometric::PRM>(pimpl_->si_);
+        pimpl_->pdef_ = std::make_shared<ompl::base::ProblemDefinition>(pimpl_->si_);
+        pimpl_->persistent_prm_->setProblemDefinition(pimpl_->pdef_);
+        pimpl_->persistent_prm_->setup();
+
+        pimpl_->initialized_ = true;
+        return true;
+    } catch (const std::exception& e) {
+        std::cerr << "[VampPlanner] init exception: " << e.what() << std::endl;
+        return false;
+    } catch (...) {
+        std::cerr << "[VampPlanner] init unknown exception" << std::endl;
+        return false;
+    }
+}
+
 
 void VampR2000icPlanner::setJointOrigins(const double origins_xyz[18], const double origins_rpy[18], const double axes_xyz[18]) {
     pimpl_->checker_.setJointOrigins(origins_xyz, origins_rpy, axes_xyz);
@@ -230,6 +247,65 @@ bool VampR2000icPlanner::planFreespace(const std::vector<double>& start_joints,
     }
 
     return false;
+}
+
+bool VampR2000icPlanner::planTrajectory(const std::vector<double>& start_joints,
+                                        const std::vector<double>& target_joints,
+                                        TimedTrajectory& trajectory_out,
+                                        double max_velocity_scaling,
+                                        double max_acceleration_scaling,
+                                        double planning_time,
+                                        double range,
+                                        double safety_margin,
+                                        const std::string& planner_type) {
+    trajectory_out.clear();
+    if (!pimpl_->initialized_ || start_joints.size() < 6 || target_joints.size() < 6) {
+        return false;
+    }
+
+    // Step 1: OMPL (PRM/RRT) global search
+    std::vector<std::vector<double>> seed_waypoints;
+    bool ok = planFreespace(start_joints, target_joints, seed_waypoints, planning_time, range, safety_margin, planner_type);
+    if (!ok || seed_waypoints.empty()) {
+        return false;
+    }
+
+    // Step 2: B-Spline + L-BFGS optimization (cuRobo style)
+    int num_cp = 12;
+    int num_samples = 40;
+    VampBSplineOptimizer optimizer(pimpl_->checker_, num_cp, num_samples);
+    optimizer.setWeights(1.0, 100.0, 200.0, safety_margin);
+
+    Eigen::MatrixXd control_points;
+    optimizer.getBSpline().initFromWaypoints(seed_waypoints, start_joints, target_joints, control_points);
+    optimizer.optimize(control_points, 25);
+
+    // Evaluate dense samples from optimized B-Spline
+    Eigen::MatrixXd optimized_samples;
+    optimizer.getBSpline().evaluate(control_points, optimized_samples);
+
+    int rows = static_cast<int>(optimized_samples.rows());
+    std::vector<std::vector<double>> opt_waypoints(rows, std::vector<double>(6));
+    for (int i = 0; i < rows; ++i) {
+        for (int d = 0; d < 6; ++d) {
+            opt_waypoints[i][d] = optimized_samples(i, d);
+        }
+    }
+
+    // Step 3: TOPP-RA time-optimal parameterization
+    VampToppra toppra_opt;
+    toppra_opt.setLimits(pimpl_->vel_limits_, pimpl_->acc_limits_);
+    bool toppra_ok = toppra_opt.parameterize(opt_waypoints, trajectory_out, max_velocity_scaling, max_acceleration_scaling, 0.01);
+    if (!toppra_ok || trajectory_out.empty()) {
+        // Fallback: assign uniform timestamps over the optimized geometric waypoints
+        double dt = 0.02;
+        trajectory_out.positions = opt_waypoints;
+        trajectory_out.time_stamps.resize(rows);
+        for (int i = 0; i < rows; ++i) {
+            trajectory_out.time_stamps[i] = i * dt;
+        }
+    }
+    return true;
 }
 
 } // namespace vamp_r2000ic

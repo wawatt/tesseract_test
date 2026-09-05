@@ -64,19 +64,7 @@ bool RobotPlanner::checkCollision(const std::vector<double>& joint_angles) {
     if (pimpl_->backend_ == PlannerBackend::VAMP && pimpl_->vamp_loader_ && joint_angles.size() == 6) {
         bool col = pimpl_->vamp_loader_->checkCollision(joint_angles);
         if (col) {
-            std::string detail = "Collision detected by VAMP SIMD engine.";
-            if (pimpl_->env_) {
-                std::vector<ContactInfo> contacts;
-                bool tess_col = checkCollisionDetailed(joint_angles, contacts, 0.0);
-                if (!tess_col || contacts.empty()) {
-                    // All contacts are permitted by ACM whitelist!
-                    pimpl_->setLastError(PlannerStatus::SUCCESS, "");
-                    return false;
-                }
-                detail = "Collision detected between '" + contacts[0].link_name1 + "' and '" + contacts[0].link_name2 + 
-                         "' (distance: " + std::to_string(contacts[0].distance) + "m).";
-            }
-            pimpl_->setLastError(PlannerStatus::COLLISION_DETECTED, detail);
+            pimpl_->setLastError(PlannerStatus::COLLISION_DETECTED, "Collision detected by VAMP SIMD engine.");
             return true;
         } else {
             pimpl_->setLastError(PlannerStatus::SUCCESS, "");

@@ -6,9 +6,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Enable SIMD instructions
 if (MSVC)
-    add_compile_options("/arch:AVX2" "/MP" "/EHsc")
+    add_compile_options("/MP" "/EHsc")
 else()
-    add_compile_options("-mavx2" "-mfma" "-O3")
+    add_compile_options("-O3")
 endif()
 
 # Find OMPL
@@ -20,10 +20,14 @@ endif()
 # Find Eigen3
 find_package(Eigen3 CONFIG QUIET)
 
+# Find toppra
+find_package(toppra CONFIG REQUIRED)
+
 # vamp_r2000ic Shared Library (DLL)
 add_library(vamp_r2000ic SHARED
     src/vamp_r2000ic_planner.cpp
     src/vamp_r2000ic_c_api.cpp
+    src/vamp_toppra.cpp
 )
 
 target_compile_definitions(vamp_r2000ic PRIVATE VAMP_R2000IC_EXPORTS)
@@ -43,6 +47,7 @@ target_include_directories(vamp_r2000ic PUBLIC
 target_link_libraries(vamp_r2000ic PUBLIC
     ${OMPL_LIBRARIES}
     ompl::ompl
+    toppra::toppra
 )
 
 # Benchmark / Test executable

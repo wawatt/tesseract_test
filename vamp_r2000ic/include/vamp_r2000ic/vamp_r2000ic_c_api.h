@@ -52,6 +52,17 @@ VAMP_EXPORT int vamp_r2000ic_set_joint_origins(VampPlannerHandle handle,
                                                const double* axes_xyz);
 
 /**
+ * @brief Configures 6-axis velocity and acceleration limits for TOPP-RA time optimal parameterization.
+ * @param handle Planner handle.
+ * @param vel_limits Array of 6 doubles (joint velocity limits in rad/s)
+ * @param acc_limits Array of 6 doubles (joint acceleration limits in rad/s^2)
+ * @return 1 on success, 0 on failure.
+ */
+VAMP_EXPORT int vamp_r2000ic_set_limits(VampPlannerHandle handle,
+                                        const double* vel_limits,
+                                        const double* acc_limits);
+
+/**
  * @brief Adds an axis-aligned box obstacle.
  * @param handle Planner handle.
  * @param name Obstacle name.
@@ -117,6 +128,26 @@ VAMP_EXPORT int vamp_r2000ic_plan_freespace(VampPlannerHandle handle,
                                            double step_size,
                                            double margin,
                                            const char* planner_type);
+
+/**
+ * @brief Plans a cuRobo-style fully parameterized trajectory (positions, velocities, accelerations, time_stamps)
+ * using PRM -> B-Spline L-BFGS -> TOPP-RA, bypassing TrajOpt.
+ */
+VAMP_EXPORT int vamp_r2000ic_plan_trajectory(VampPlannerHandle handle,
+                                             const double* start_joints_6,
+                                             const double* goal_joints_6,
+                                             double* out_positions,
+                                             double* out_velocities,
+                                             double* out_accelerations,
+                                             double* out_time_stamps,
+                                             int* out_num_points,
+                                             int max_points,
+                                             double max_vel_scaling,
+                                             double max_acc_scaling,
+                                             double timeout,
+                                             double step_size,
+                                             double margin,
+                                             const char* planner_type);
 
 /**
  * @brief Precomputes and warms up the persistent PRM roadmap graph.

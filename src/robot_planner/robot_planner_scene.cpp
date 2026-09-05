@@ -122,6 +122,12 @@ bool RobotPlanner::addBox(const std::string& name, double x, double y, double z,
     geom.dim_z = dim_z;
     pimpl_->obstacle_geometries_[name] = geom;
 
+    // In VAMP mode, bypass Tesseract SceneGraph manipulation completely
+    if (pimpl_->backend_ == PlannerBackend::VAMP) {
+        pimpl_->setLastError(PlannerStatus::SUCCESS, "");
+        return true;
+    }
+
     if (!pimpl_->env_) return false;
     
     tesseract::scene_graph::Link link(name);
@@ -167,6 +173,12 @@ bool RobotPlanner::addSphere(const std::string& name, double x, double y, double
     geom.initial_pose.translation() = Eigen::Vector3d(x, y, z);
     geom.radius = radius;
     pimpl_->obstacle_geometries_[name] = geom;
+
+    // In VAMP mode, bypass Tesseract SceneGraph manipulation completely
+    if (pimpl_->backend_ == PlannerBackend::VAMP) {
+        pimpl_->setLastError(PlannerStatus::SUCCESS, "");
+        return true;
+    }
 
     if (!pimpl_->env_) return false;
 
@@ -223,6 +235,12 @@ bool RobotPlanner::addCylinder(const std::string& name, double radius, double le
     geom_cyl.length = length;
     pimpl_->obstacle_geometries_[name] = geom_cyl;
 
+    // In VAMP mode, bypass Tesseract SceneGraph manipulation completely
+    if (pimpl_->backend_ == PlannerBackend::VAMP) {
+        pimpl_->setLastError(PlannerStatus::SUCCESS, "");
+        return true;
+    }
+
     if (!pimpl_->env_) return false;
 
     tesseract::scene_graph::Link link(name);
@@ -278,6 +296,12 @@ bool RobotPlanner::addCapsule(const std::string& name, double radius, double len
     geom_cap.length = length;
     pimpl_->obstacle_geometries_[name] = geom_cap;
 
+    // In VAMP mode, bypass Tesseract SceneGraph manipulation completely
+    if (pimpl_->backend_ == PlannerBackend::VAMP) {
+        pimpl_->setLastError(PlannerStatus::SUCCESS, "");
+        return true;
+    }
+
     if (!pimpl_->env_) return false;
 
     tesseract::scene_graph::Link link(name);
@@ -332,6 +356,12 @@ bool RobotPlanner::addMesh(const std::string& name,
     geom_mesh.initial_pose.linear() = q_mesh.matrix();
     geom_mesh.aabb_array = aabbs;
     pimpl_->obstacle_geometries_[name] = geom_mesh;
+
+    // In VAMP mode, bypass Tesseract SceneGraph manipulation completely
+    if (pimpl_->backend_ == PlannerBackend::VAMP) {
+        pimpl_->setLastError(PlannerStatus::SUCCESS, "");
+        return true;
+    }
 
     if (!pimpl_->env_) return false;
 
@@ -396,6 +426,12 @@ bool RobotPlanner::addPointCloud(const std::string& name,
     geom_pc.initial_pose.linear() = q_pc.matrix();
     geom_pc.aabb_array = aabbs;
     pimpl_->obstacle_geometries_[name] = geom_pc;
+
+    // In VAMP mode, bypass Tesseract SceneGraph manipulation completely
+    if (pimpl_->backend_ == PlannerBackend::VAMP) {
+        pimpl_->setLastError(PlannerStatus::SUCCESS, "");
+        return true;
+    }
 
     if (!pimpl_->env_) return false;
     
@@ -473,6 +509,12 @@ bool RobotPlanner::removeObstacle(const std::string& name) {
     pimpl_->attached_obstacles_.erase(name);
     pimpl_->obstacle_geometries_.erase(name);
 
+    // In VAMP mode, bypass Tesseract SceneGraph manipulation completely
+    if (pimpl_->backend_ == PlannerBackend::VAMP) {
+        pimpl_->setLastError(PlannerStatus::SUCCESS, "");
+        return true;
+    }
+
     if (!pimpl_->env_) return false;
     
     auto cmd = std::make_shared<tesseract::environment::RemoveLinkCommand>(name);
@@ -530,17 +572,51 @@ bool RobotPlanner::attachObject(const std::string& obstacle_name, const std::str
         current_state = pimpl_->env_->getState();
     }
 
-    auto it_obs = current_state.link_transforms.find(obstacle_name);
-    auto it_target = current_state.link_transforms.find(actual_link);
+    Eigen::Isometry3d obs_tf;
+    auto it_geom = pimpl_->obstacle_geometries_.find(obstacle_name);
+    if (it_geom != pimpl_->obstacle_geometries_.end()) {
+        obs_tf = it_geom->second.initial_pose;
+    } else {
+        auto it_obs = current_state.link_transforms.find(obstacle_name);
+        if (it_obs != current_state.link_transforms.end()) {
+            obs_tf = it_obs->second;
+        } else {
+            pimpl_->setLastError(PlannerStatus::INTERNAL_ERROR, "Failed to query link transforms for attaching.");
+            return false;
+        }
+    }
 
-    if (it_obs == current_state.link_transforms.end() || it_target == current_state.link_transforms.end()) {
+    auto it_target = current_state.link_transforms.find(actual_link);
+    if (it_target == current_state.link_transforms.end()) {
         pimpl_->setLastError(PlannerStatus::INTERNAL_ERROR, "Failed to query link transforms for attaching.");
         return false;
     }
 
-    Eigen::Isometry3d obs_tf = it_obs->second;
     Eigen::Isometry3d target_tf = it_target->second;
     Eigen::Isometry3d rel_tf = target_tf.inverse() * obs_tf;
+    pimpl_->attached_obstacles_[obstacle_name] = actual_link;
+
+    if (pimpl_->backend_ == PlannerBackend::VAMP) {
+        if (pimpl_->vamp_loader_ && pimpl_->vamp_loader_->isLoaded()) {
+            if (it_geom != pimpl_->obstacle_geometries_.end()) {
+                int link_idx = mapLinkNameToIndex(actual_link);
+                std::string vamp_link_name = (link_idx >= 6) ? "J6_link" : ("J" + std::to_string(link_idx) + "_link");
+                if (link_idx == 0) vamp_link_name = "base_link";
+
+                auto it_vamp_link = current_state.link_transforms.find(vamp_link_name);
+                Eigen::Isometry3d vamp_link_tf = (it_vamp_link != current_state.link_transforms.end()) ? it_vamp_link->second : target_tf;
+                Eigen::Isometry3d rel_tf_vamp = vamp_link_tf.inverse() * obs_tf;
+
+                std::vector<double> fitted_spheres = fitSpheresToObject(it_geom->second, rel_tf_vamp);
+                if (!fitted_spheres.empty()) {
+                    pimpl_->vamp_loader_->addAttachedSpheres(obstacle_name, link_idx, fitted_spheres.data(), static_cast<int>(fitted_spheres.size() / 4));
+                }
+            }
+            pimpl_->vamp_loader_->removeObstacle(obstacle_name);
+        }
+        pimpl_->setLastError(PlannerStatus::SUCCESS, "");
+        return true;
+    }
 
     tesseract::environment::Commands cmds;
     tesseract::scene_graph::Joint joint(obstacle_name + "_joint");
@@ -614,6 +690,31 @@ bool RobotPlanner::detachObject(const std::string& obstacle_name, const std::vec
         }
     } else {
         current_state = pimpl_->env_->getState();
+    }
+
+    auto it_geom = pimpl_->obstacle_geometries_.find(obstacle_name);
+    auto it_target = current_state.link_transforms.find(attached_link);
+    Eigen::Isometry3d target_tf = (it_target != current_state.link_transforms.end()) ? it_target->second : Eigen::Isometry3d::Identity();
+
+    if (pimpl_->backend_ == PlannerBackend::VAMP) {
+        pimpl_->attached_obstacles_.erase(it_attached);
+        if (pimpl_->vamp_loader_ && pimpl_->vamp_loader_->isLoaded()) {
+            pimpl_->vamp_loader_->removeAttachedSpheres(obstacle_name);
+            if (it_geom != pimpl_->obstacle_geometries_.end()) {
+                const auto& g = it_geom->second;
+                Eigen::Isometry3d world_tf = target_tf;
+                if (g.type == ObstacleShapeType::BOX) {
+                    pimpl_->vamp_loader_->addBox(obstacle_name, world_tf.translation().x(), world_tf.translation().y(), world_tf.translation().z(),
+                                                 g.dim_x, g.dim_y, g.dim_z);
+                } else if (g.type == ObstacleShapeType::SPHERE) {
+                    double d = 2.0 * g.radius;
+                    pimpl_->vamp_loader_->addBox(obstacle_name, world_tf.translation().x(), world_tf.translation().y(), world_tf.translation().z(),
+                                                 d, d, d);
+                }
+            }
+        }
+        pimpl_->setLastError(PlannerStatus::SUCCESS, "");
+        return true;
     }
 
     auto it_obs = current_state.link_transforms.find(obstacle_name);

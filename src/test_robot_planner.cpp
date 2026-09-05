@@ -727,7 +727,7 @@ int main(int argc, char** argv) {
             wm.freespace_valid = cur_planner.validateTrajectory(free_traj, &fail_pt, &fail_msg);
             std::cout << "    - planFreespace: SUCCESS in " << wm.freespace_ms << " ms | Points: " 
                       << wm.freespace_pts << " | Duration: " << wm.freespace_dur 
-                      << "s | Validator: " << (wm.freespace_valid ? "100% COMPLIANT" : "FAIL") << std::endl;
+                      << "s | Validator: " << (wm.freespace_valid ? "100% COMPLIANT" : fail_msg) << std::endl;
         } else {
             std::cerr << "    - planFreespace FAILED: " << cur_planner.getLastError() << std::endl;
         }

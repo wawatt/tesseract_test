@@ -1,6 +1,7 @@
 #pragma once
 
 #include "r2000ic_collision.hpp"
+#include "vamp_toppra.hpp"
 #include <vector>
 #include <string>
 #include <memory>
@@ -31,6 +32,11 @@ public:
      * @brief Configure the 6 joint origins and axes from URDF.
      */
     void setJointOrigins(const double origins_xyz[18], const double origins_rpy[18], const double axes_xyz[18]);
+
+    /**
+     * @brief Configure joint velocity and acceleration limits for TOPP-RA time parameterization.
+     */
+    void setLimits(const double vel_limits[6], const double acc_limits[6]);
 
     /**
      * @brief Add an Axis-Aligned Bounding Box obstacle into the collision environment.
@@ -82,6 +88,20 @@ public:
                        double range = 0.02,
                        double safety_margin = 0.025,
                        const std::string& planner_type = "PRM");
+
+    /**
+     * @brief cuRobo-style full planning pipeline: OMPL (PRM) -> B-Spline + L-BFGS -> TOPP-RA.
+     * Generates a fully-dynamic, time-optimal, collision-free trajectory in milliseconds without TrajOpt.
+     */
+    bool planTrajectory(const std::vector<double>& start_joints,
+                        const std::vector<double>& target_joints,
+                        TimedTrajectory& trajectory_out,
+                        double max_velocity_scaling = 1.0,
+                        double max_acceleration_scaling = 1.0,
+                        double planning_time = 5.0,
+                        double range = 0.02,
+                        double safety_margin = 0.025,
+                        const std::string& planner_type = "PRM");
 
     /**
      * @brief Precompute/warm up the persistent PRM roadmap.
