@@ -16,6 +16,7 @@ bool RobotPlanner::checkCollisionDetailed(const std::vector<double>& joint_angle
         pimpl_->setLastError(PlannerStatus::INVALID_ARGUMENTS, "joint_angles size mismatch.");
         return false;
     }
+    pimpl_->last_known_joints_ = joint_angles;
     Eigen::VectorXd joints = Eigen::Map<const Eigen::VectorXd>(joint_angles.data(), joint_angles.size());
     tesseract::scene_graph::SceneState state = pimpl_->env_->getState(joint_names, joints);
     
@@ -59,6 +60,7 @@ bool RobotPlanner::checkCollisionDetailed(const std::vector<double>& joint_angle
 }
 
 bool RobotPlanner::checkCollision(const std::vector<double>& joint_angles) {
+    pimpl_->last_known_joints_ = joint_angles;
     if (pimpl_->backend_ == PlannerBackend::VAMP && pimpl_->vamp_loader_ && joint_angles.size() == 6) {
         bool col = pimpl_->vamp_loader_->checkCollision(joint_angles);
         if (col) {

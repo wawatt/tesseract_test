@@ -4,6 +4,9 @@
 #include <vector>
 #include <array>
 #include <cmath>
+#include <unordered_map>
+#include <string>
+#include <algorithm>
 
 namespace vamp_r2000ic {
 
@@ -192,13 +195,44 @@ public:
         std::array<Transform4, NUM_LINKS> link_transforms;
         computeLinkTransforms(joints, link_transforms);
 
-        world_spheres.resize(local_spheres_.size());
+        size_t total_count = local_spheres_.size();
+        for (const auto& pair : attached_spheres_) {
+            total_count += pair.second.size();
+        }
+
+        world_spheres.resize(total_count);
         for (size_t i = 0; i < local_spheres_.size(); ++i) {
             const auto& ls = local_spheres_[i];
             const auto& t = link_transforms[ls.link_index];
             Point3 wp = t.transformPoint(ls.local_pos);
             world_spheres[i] = Sphere(wp.x, wp.y, wp.z, ls.radius);
         }
+
+        size_t cur_idx = local_spheres_.size();
+        for (const auto& pair : attached_spheres_) {
+            for (const auto& ls : pair.second) {
+                int link_idx = std::clamp(ls.link_index, 0, NUM_LINKS - 1);
+                const auto& t = link_transforms[link_idx];
+                Point3 wp = t.transformPoint(ls.local_pos);
+                world_spheres[cur_idx++] = Sphere(wp.x, wp.y, wp.z, ls.radius);
+            }
+        }
+    }
+
+    void addAttachedSpheres(const std::string& name, int link_index, const std::vector<Sphere>& spheres) {
+        std::vector<LocalSphere> list;
+        for (const auto& s : spheres) {
+            list.push_back({ link_index, Point3(s.x, s.y, s.z), s.r });
+        }
+        attached_spheres_[name] = list;
+    }
+
+    bool removeAttachedSpheres(const std::string& name) {
+        return attached_spheres_.erase(name) > 0;
+    }
+
+    void clearAttachedSpheres() {
+        attached_spheres_.clear();
     }
 
     const std::vector<LocalSphere>& getLocalSpheres() const {
@@ -207,6 +241,7 @@ public:
 
 private:
     std::vector<LocalSphere> local_spheres_;
+    std::unordered_map<std::string, std::vector<LocalSphere>> attached_spheres_;
     std::array<Transform4, NUM_JOINTS> origin_transforms_;
     std::array<Point3, NUM_JOINTS> axes_;
 

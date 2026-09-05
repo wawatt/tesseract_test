@@ -78,6 +78,27 @@ TESSERACT_COMMON_IGNORE_WARNINGS_POP
 
 namespace robot_planner {
 
+enum class ObstacleShapeType {
+    BOX,
+    SPHERE,
+    CYLINDER,
+    CAPSULE,
+    MESH,
+    POINT_CLOUD
+};
+
+struct ObstacleGeometryInfo {
+    std::string name;
+    ObstacleShapeType type;
+    Eigen::Isometry3d initial_pose = Eigen::Isometry3d::Identity();
+    double dim_x = 0.0;
+    double dim_y = 0.0;
+    double dim_z = 0.0;
+    double radius = 0.0;
+    double length = 0.0;
+    std::vector<double> aabb_array;
+};
+
 struct RobotPlanner::Impl {
     std::shared_ptr<tesseract::environment::Environment> env_;
     std::string manipulator_name_;
@@ -114,6 +135,8 @@ struct RobotPlanner::Impl {
     // Scene & Obstacle management
     std::unordered_set<std::string> obstacle_names_;
     std::unordered_map<std::string, std::string> attached_obstacles_; // obstacle_name -> link_name
+    std::unordered_map<std::string, ObstacleGeometryInfo> obstacle_geometries_;
+    std::vector<double> last_known_joints_;
 };
 
 // Flexible resource locator that searches relative to URDF path and CWD

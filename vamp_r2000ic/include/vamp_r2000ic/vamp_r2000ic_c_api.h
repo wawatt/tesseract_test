@@ -118,6 +118,44 @@ VAMP_EXPORT int vamp_r2000ic_plan_freespace(VampPlannerHandle handle,
                                            double margin,
                                            const char* planner_type);
 
+/**
+ * @brief Precomputes and warms up the persistent PRM roadmap graph.
+ * @param handle Planner handle.
+ * @param warmup_time Time in seconds to grow roadmap.
+ * @return 1 on success, 0 on failure.
+ */
+VAMP_EXPORT int vamp_r2000ic_warmup_roadmap(VampPlannerHandle handle, double warmup_time);
+
+/**
+ * @brief Attaches workpiece bounding spheres to a robot link for attached-body SIMD collision checks.
+ * @param handle Planner handle.
+ * @param name Workpiece/obstacle name.
+ * @param link_index Robot link index (6 for tool0/J6_link).
+ * @param spheres_xyzr Flat array of [x, y, z, radius] in link local coordinates.
+ * @param sphere_count Number of spheres.
+ * @return 1 on success, 0 on failure.
+ */
+VAMP_EXPORT int vamp_r2000ic_add_attached_spheres(VampPlannerHandle handle,
+                                                  const char* name,
+                                                  int link_index,
+                                                  const double* spheres_xyzr,
+                                                  int sphere_count);
+
+/**
+ * @brief Removes attached workpiece spheres when detaching.
+ * @param handle Planner handle.
+ * @param name Workpiece/obstacle name.
+ * @return 1 on success, 0 on failure.
+ */
+VAMP_EXPORT int vamp_r2000ic_remove_attached_spheres(VampPlannerHandle handle, const char* name);
+
+/**
+ * @brief Clears all attached workpiece spheres.
+ * @param handle Planner handle.
+ * @return 1 on success, 0 on failure.
+ */
+VAMP_EXPORT int vamp_r2000ic_clear_attached_spheres(VampPlannerHandle handle);
+
 #ifdef __cplusplus
 }
 #endif

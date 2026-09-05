@@ -70,6 +70,18 @@ public:
         kinematics_.setJointOrigins(origins_xyz, origins_rpy, axes_xyz);
     }
 
+    void addAttachedSpheres(const std::string& name, int link_index, const std::vector<Sphere>& spheres) {
+        kinematics_.addAttachedSpheres(name, link_index, spheres);
+    }
+
+    bool removeAttachedSpheres(const std::string& name) {
+        return kinematics_.removeAttachedSpheres(name);
+    }
+
+    void clearAttachedSpheres() {
+        kinematics_.clearAttachedSpheres();
+    }
+
     /**
      * @brief Checks whether the robot at given joint angles is in collision with environment or self.
      * @param joints 6 joint values

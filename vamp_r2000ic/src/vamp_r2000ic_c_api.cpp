@@ -144,3 +144,59 @@ int vamp_r2000ic_plan_freespace(VampPlannerHandle handle,
         return 0;
     }
 }
+
+int vamp_r2000ic_warmup_roadmap(VampPlannerHandle handle, double warmup_time) {
+    if (!handle) return 0;
+    auto* planner = static_cast<vamp_r2000ic::VampR2000icPlanner*>(handle);
+    try {
+        planner->warmupRoadmap(warmup_time);
+        return 1;
+    } catch (...) {
+        return 0;
+    }
+}
+
+int vamp_r2000ic_add_attached_spheres(VampPlannerHandle handle,
+                                      const char* name,
+                                      int link_index,
+                                      const double* spheres_xyzr,
+                                      int sphere_count) {
+    if (!handle || !name || !spheres_xyzr || sphere_count <= 0) return 0;
+    auto* planner = static_cast<vamp_r2000ic::VampR2000icPlanner*>(handle);
+    try {
+        std::vector<vamp_r2000ic::Sphere> list;
+        list.reserve(sphere_count);
+        for (int i = 0; i < sphere_count; ++i) {
+            float x = static_cast<float>(spheres_xyzr[i * 4 + 0]);
+            float y = static_cast<float>(spheres_xyzr[i * 4 + 1]);
+            float z = static_cast<float>(spheres_xyzr[i * 4 + 2]);
+            float r = static_cast<float>(spheres_xyzr[i * 4 + 3]);
+            list.emplace_back(x, y, z, r);
+        }
+        planner->addAttachedSpheres(std::string(name), link_index, list);
+        return 1;
+    } catch (...) {
+        return 0;
+    }
+}
+
+int vamp_r2000ic_remove_attached_spheres(VampPlannerHandle handle, const char* name) {
+    if (!handle || !name) return 0;
+    auto* planner = static_cast<vamp_r2000ic::VampR2000icPlanner*>(handle);
+    try {
+        return planner->removeAttachedSpheres(std::string(name)) ? 1 : 0;
+    } catch (...) {
+        return 0;
+    }
+}
+
+int vamp_r2000ic_clear_attached_spheres(VampPlannerHandle handle) {
+    if (!handle) return 0;
+    auto* planner = static_cast<vamp_r2000ic::VampR2000icPlanner*>(handle);
+    try {
+        planner->clearAttachedSpheres();
+        return 1;
+    } catch (...) {
+        return 0;
+    }
+}

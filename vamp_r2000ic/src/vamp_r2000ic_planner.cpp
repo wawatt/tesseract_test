@@ -6,6 +6,7 @@
 #include <ompl/geometric/planners/rrt/RRTstar.h>
 #include <ompl/geometric/planners/prm/PRM.h>
 #include <ompl/geometric/PathSimplifier.h>
+#include <ompl/base/PlannerTerminationCondition.h>
 
 namespace vamp_r2000ic {
 
@@ -13,8 +14,15 @@ struct VampR2000icPlanner::Impl {
     CollisionChecker checker_;
     std::shared_ptr<ompl::base::RealVectorStateSpace> space_;
     ompl::base::SpaceInformationPtr si_;
+    std::shared_ptr<VampStateValidityChecker> checker_adapter_;
+    std::shared_ptr<VampMotionValidator> validator_adapter_;
+    std::shared_ptr<ompl::geometric::PRM> persistent_prm_;
+    std::shared_ptr<ompl::base::ProblemDefinition> pdef_;
 
     bool initialized_ = false;
+    bool roadmap_warmed_ = false;
+    float current_safety_margin_ = 0.025f;
+    double current_range_ = 0.02;
 };
 
 VampR2000icPlanner::VampR2000icPlanner() : pimpl_(std::make_unique<Impl>()) {}
@@ -23,6 +31,19 @@ VampR2000icPlanner::~VampR2000icPlanner() = default;
 bool VampR2000icPlanner::init() {
     pimpl_->space_ = createR2000icStateSpace();
     pimpl_->si_ = std::make_shared<ompl::base::SpaceInformation>(pimpl_->space_);
+    pimpl_->checker_adapter_ = std::make_shared<VampStateValidityChecker>(pimpl_->si_, pimpl_->checker_, pimpl_->current_safety_margin_);
+    pimpl_->validator_adapter_ = std::make_shared<VampMotionValidator>(pimpl_->si_, pimpl_->checker_, pimpl_->current_safety_margin_, pimpl_->current_range_);
+
+    pimpl_->si_->setStateValidityChecker(pimpl_->checker_adapter_);
+    pimpl_->si_->setMotionValidator(pimpl_->validator_adapter_);
+    pimpl_->si_->setup();
+
+    // Initialize persistent PRM planner
+    pimpl_->persistent_prm_ = std::make_shared<ompl::geometric::PRM>(pimpl_->si_);
+    pimpl_->pdef_ = std::make_shared<ompl::base::ProblemDefinition>(pimpl_->si_);
+    pimpl_->persistent_prm_->setProblemDefinition(pimpl_->pdef_);
+    pimpl_->persistent_prm_->setup();
+
     pimpl_->initialized_ = true;
     return true;
 }
@@ -31,22 +52,63 @@ void VampR2000icPlanner::setJointOrigins(const double origins_xyz[18], const dou
     pimpl_->checker_.setJointOrigins(origins_xyz, origins_rpy, axes_xyz);
 }
 
+void VampR2000icPlanner::warmupRoadmap(double warmup_time) {
+    if (!pimpl_->initialized_ || !pimpl_->persistent_prm_) return;
+    pimpl_->persistent_prm_->growRoadmap(warmup_time);
+    pimpl_->roadmap_warmed_ = true;
+}
+
 void VampR2000icPlanner::addObstacleBox(const std::string& name, double cx, double cy, double cz,
                                        double dx, double dy, double dz) {
     pimpl_->checker_.addBoxCenterDim(name, static_cast<float>(cx), static_cast<float>(cy), static_cast<float>(cz),
                                      static_cast<float>(dx), static_cast<float>(dy), static_cast<float>(dz));
+    if (pimpl_->persistent_prm_) {
+        pimpl_->persistent_prm_->clearQuery();
+    }
 }
 
 void VampR2000icPlanner::addObstacleBoxes(const std::string& name, const std::vector<AABB>& boxes) {
     pimpl_->checker_.addBoxes(name, boxes);
+    if (pimpl_->persistent_prm_) {
+        pimpl_->persistent_prm_->clearQuery();
+    }
 }
 
 bool VampR2000icPlanner::removeObstacle(const std::string& name) {
-    return pimpl_->checker_.removeObstacle(name);
+    bool res = pimpl_->checker_.removeObstacle(name);
+    if (res && pimpl_->persistent_prm_) {
+        pimpl_->persistent_prm_->clearQuery();
+    }
+    return res;
 }
 
 void VampR2000icPlanner::clearObstacles() {
     pimpl_->checker_.clearObstacles();
+    if (pimpl_->persistent_prm_) {
+        pimpl_->persistent_prm_->clearQuery();
+    }
+}
+
+void VampR2000icPlanner::addAttachedSpheres(const std::string& name, int link_index, const std::vector<Sphere>& spheres) {
+    pimpl_->checker_.addAttachedSpheres(name, link_index, spheres);
+    if (pimpl_->persistent_prm_) {
+        pimpl_->persistent_prm_->clearQuery();
+    }
+}
+
+bool VampR2000icPlanner::removeAttachedSpheres(const std::string& name) {
+    bool res = pimpl_->checker_.removeAttachedSpheres(name);
+    if (res && pimpl_->persistent_prm_) {
+        pimpl_->persistent_prm_->clearQuery();
+    }
+    return res;
+}
+
+void VampR2000icPlanner::clearAttachedSpheres() {
+    pimpl_->checker_.clearAttachedSpheres();
+    if (pimpl_->persistent_prm_) {
+        pimpl_->persistent_prm_->clearQuery();
+    }
 }
 
 bool VampR2000icPlanner::checkCollision(const std::vector<double>& joints, double safety_margin) {
@@ -73,35 +135,73 @@ bool VampR2000icPlanner::planFreespace(const std::vector<double>& start_joints,
         return false;
     }
 
-    // Check endpoints first
+    // Check endpoints first with SIMD kernel
     if (checkCollision(start_joints, safety_margin) || checkCollision(target_joints, safety_margin)) {
         std::cerr << "[VampPlanner] Start or Target configuration is in collision!" << std::endl;
         return false;
     }
 
-    ompl::geometric::SimpleSetup ss(pimpl_->space_);
+    // Fast path: cuRobo-style PRMGraphPlanner with persistent roadmap & warmup
+    if (planner_type == "PRM" || planner_type == "prm" || planner_type.empty()) {
+        if (!pimpl_->roadmap_warmed_) {
+            pimpl_->persistent_prm_->growRoadmap(0.2);
+            pimpl_->roadmap_warmed_ = true;
+        }
 
-    // Set validity checker & motion validator with current obstacle state
+        pimpl_->persistent_prm_->clearQuery();
+        pimpl_->pdef_->clearStartStates();
+        pimpl_->pdef_->clearGoal();
+        pimpl_->pdef_->clearSolutionPaths();
+
+        ompl::base::ScopedState<ompl::base::RealVectorStateSpace> start(pimpl_->space_);
+        ompl::base::ScopedState<ompl::base::RealVectorStateSpace> goal(pimpl_->space_);
+        for (int i = 0; i < 6; ++i) {
+            start->values[i] = start_joints[i];
+            goal->values[i] = target_joints[i];
+        }
+        pimpl_->pdef_->setStartAndGoalStates(start, goal);
+
+        ompl::base::PlannerStatus solved = pimpl_->persistent_prm_->solve(ompl::base::timedPlannerTerminationCondition(planning_time));
+        if (solved && pimpl_->pdef_->hasExactSolution()) {
+            auto path_ptr = pimpl_->pdef_->getSolutionPath();
+            auto* geo_path = dynamic_cast<ompl::geometric::PathGeometric*>(path_ptr.get());
+            if (geo_path) {
+                ompl::geometric::PathSimplifier simplifier(pimpl_->si_);
+                simplifier.simplifyMax(*geo_path);
+                simplifier.smoothBSpline(*geo_path, 3);
+                geo_path->interpolate();
+
+                trajectory_out.clear();
+                trajectory_out.reserve(geo_path->getStateCount());
+                for (size_t i = 0; i < geo_path->getStateCount(); ++i) {
+                    const auto* rstate = geo_path->getState(i)->as<ompl::base::RealVectorStateSpace::StateType>();
+                    std::vector<double> wp(6);
+                    for (int j = 0; j < 6; ++j) wp[j] = rstate->values[j];
+                    trajectory_out.push_back(wp);
+                }
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Fallback: single-query tree search (RRTConnect / RRTstar)
+    ompl::geometric::SimpleSetup ss(pimpl_->space_);
     auto checker = std::make_shared<VampStateValidityChecker>(ss.getSpaceInformation(), pimpl_->checker_, static_cast<float>(safety_margin));
     auto validator = std::make_shared<VampMotionValidator>(ss.getSpaceInformation(), pimpl_->checker_, static_cast<float>(safety_margin), range);
     ss.setStateValidityChecker(checker);
     ss.getSpaceInformation()->setMotionValidator(validator);
 
-    // Set planner
     if (planner_type == "RRTstar" || planner_type == "RRT*") {
         auto rrtstar = std::make_shared<ompl::geometric::RRTstar>(ss.getSpaceInformation());
         rrtstar->setRange(range);
         ss.setPlanner(rrtstar);
-    } else if (planner_type == "PRM") {
-        auto prm = std::make_shared<ompl::geometric::PRM>(ss.getSpaceInformation());
-        ss.setPlanner(prm);
     } else {
         auto rrtconn = std::make_shared<ompl::geometric::RRTConnect>(ss.getSpaceInformation());
         rrtconn->setRange(range);
         ss.setPlanner(rrtconn);
     }
 
-    // Set start and goal
     ompl::base::ScopedState<ompl::base::RealVectorStateSpace> start(pimpl_->space_);
     ompl::base::ScopedState<ompl::base::RealVectorStateSpace> goal(pimpl_->space_);
     for (int i = 0; i < 6; ++i) {
@@ -110,26 +210,20 @@ bool VampR2000icPlanner::planFreespace(const std::vector<double>& start_joints,
     }
     ss.setStartAndGoalStates(start, goal);
 
-    // Solve
     ompl::base::PlannerStatus solved = ss.solve(planning_time);
     if (solved && ss.haveExactSolutionPath()) {
         auto& path = ss.getSolutionPath();
-
-        // OMPL Post-processing: Shortcut pruning + B-Spline high-order smoothing
         ompl::geometric::PathSimplifier simplifier(ss.getSpaceInformation());
         simplifier.simplifyMax(path);
         simplifier.smoothBSpline(path, 3);
-        path.interpolate(); // Uniformly interpolate waypoints
+        path.interpolate();
 
         trajectory_out.clear();
         trajectory_out.reserve(path.getStateCount());
-
         for (size_t i = 0; i < path.getStateCount(); ++i) {
             const auto* rstate = path.getState(i)->as<ompl::base::RealVectorStateSpace::StateType>();
             std::vector<double> wp(6);
-            for (int j = 0; j < 6; ++j) {
-                wp[j] = rstate->values[j];
-            }
+            for (int j = 0; j < 6; ++j) wp[j] = rstate->values[j];
             trajectory_out.push_back(wp);
         }
         return true;

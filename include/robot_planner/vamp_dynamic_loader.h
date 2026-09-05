@@ -28,6 +28,10 @@ public:
     typedef int (*FnCheckCollision)(void*, const double*);
     typedef int (*FnPlanFreespace)(void*, const double*, const double*, double*, int*, int, double, double, double, const char*);
     typedef int (*FnSetJointOrigins)(void*, const double*, const double*, const double*);
+    typedef int (*FnWarmupRoadmap)(void*, double);
+    typedef int (*FnAddAttachedSpheres)(void*, const char*, int, const double*, int);
+    typedef int (*FnRemoveAttachedSpheres)(void*, const char*);
+    typedef int (*FnClearAttachedSpheres)(void*);
 
     VampDynamicLoader() = default;
 
@@ -106,6 +110,10 @@ public:
         fnCheckCollision_ = (FnCheckCollision)GetProcAddress(hModule_, "vamp_r2000ic_check_collision");
         fnPlanFreespace_ = (FnPlanFreespace)GetProcAddress(hModule_, "vamp_r2000ic_plan_freespace");
         fnSetJointOrigins_ = (FnSetJointOrigins)GetProcAddress(hModule_, "vamp_r2000ic_set_joint_origins");
+        fnWarmupRoadmap_ = (FnWarmupRoadmap)GetProcAddress(hModule_, "vamp_r2000ic_warmup_roadmap");
+        fnAddAttachedSpheres_ = (FnAddAttachedSpheres)GetProcAddress(hModule_, "vamp_r2000ic_add_attached_spheres");
+        fnRemoveAttachedSpheres_ = (FnRemoveAttachedSpheres)GetProcAddress(hModule_, "vamp_r2000ic_remove_attached_spheres");
+        fnClearAttachedSpheres_ = (FnClearAttachedSpheres)GetProcAddress(hModule_, "vamp_r2000ic_clear_attached_spheres");
 
         if (!fnCreate_ || !fnDestroy_ || !fnInit_ || !fnAddBox_ || !fnRemoveObstacle_ || !fnCheckCollision_ || !fnPlanFreespace_) {
             unload();
@@ -146,6 +154,10 @@ public:
         fnCheckCollision_ = nullptr;
         fnPlanFreespace_ = nullptr;
         fnSetJointOrigins_ = nullptr;
+        fnWarmupRoadmap_ = nullptr;
+        fnAddAttachedSpheres_ = nullptr;
+        fnRemoveAttachedSpheres_ = nullptr;
+        fnClearAttachedSpheres_ = nullptr;
     }
 
     const std::string& getResolvedPath() const {
@@ -182,13 +194,33 @@ public:
         return fnCheckCollision_(handle_, joints.data()) == 1;
     }
 
+    bool warmupRoadmap(double warmup_time = 0.3) {
+        if (!isLoaded() || !fnWarmupRoadmap_) return false;
+        return fnWarmupRoadmap_(handle_, warmup_time) == 1;
+    }
+
+    bool addAttachedSpheres(const std::string& name, int link_index, const double* spheres_xyzr, int sphere_count) {
+        if (!isLoaded() || !fnAddAttachedSpheres_ || !spheres_xyzr || sphere_count <= 0) return false;
+        return fnAddAttachedSpheres_(handle_, name.c_str(), link_index, spheres_xyzr, sphere_count) == 1;
+    }
+
+    bool removeAttachedSpheres(const std::string& name) {
+        if (!isLoaded() || !fnRemoveAttachedSpheres_) return false;
+        return fnRemoveAttachedSpheres_(handle_, name.c_str()) == 1;
+    }
+
+    bool clearAttachedSpheres() {
+        if (!isLoaded() || !fnClearAttachedSpheres_) return false;
+        return fnClearAttachedSpheres_(handle_) == 1;
+    }
+
     bool planFreespace(const std::vector<double>& start,
                        const std::vector<double>& goal,
                        std::vector<std::vector<double>>& trajectory_out,
                        double timeout = 5.0,
                        double step_size = 0.02,
                        double margin = 0.025,
-                       const std::string& planner_type = "RRTConnect") {
+                       const std::string& planner_type = "PRM") {
         if (!isLoaded() || !fnPlanFreespace_ || start.size() < 6 || goal.size() < 6) {
             return false;
         }
@@ -229,6 +261,10 @@ private:
     FnCheckCollision fnCheckCollision_ = nullptr;
     FnPlanFreespace fnPlanFreespace_ = nullptr;
     FnSetJointOrigins fnSetJointOrigins_ = nullptr;
+    FnWarmupRoadmap fnWarmupRoadmap_ = nullptr;
+    FnAddAttachedSpheres fnAddAttachedSpheres_ = nullptr;
+    FnRemoveAttachedSpheres fnRemoveAttachedSpheres_ = nullptr;
+    FnClearAttachedSpheres fnClearAttachedSpheres_ = nullptr;
 };
 
 } // namespace robot_planner

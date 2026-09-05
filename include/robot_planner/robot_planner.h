@@ -329,16 +329,21 @@ public:
      * @brief 将场景中已有的障碍物挂载/附着到机械臂指定连杆上 (用于末端工件抓取随动碰撞检测)
      * @param obstacle_name 障碍物名称
      * @param link_name 挂载的目标连杆 (传空字符串则默认挂载到 tool_link)
+     * @param current_joints [可选] 抓取时的关节角度 (用于精确计算相对挂载矩阵，传空则自动使用当前有效位形)
      * @return 成功返回 true
      */
-    bool attachObject(const std::string& obstacle_name, const std::string& link_name = "");
+    bool attachObject(const std::string& obstacle_name, 
+                      const std::string& link_name = "", 
+                      const std::vector<double>& current_joints = {});
 
     /**
      * @brief 将已附着到机械臂上的物体分离/解除挂载，放回世界坐标系
      * @param obstacle_name 障碍物名称
+     * @param current_joints [可选] 分离时的关节角度 (用于更新物体放置位姿，传空则自动使用当前有效位形)
      * @return 成功返回 true
      */
-    bool detachObject(const std::string& obstacle_name);
+    bool detachObject(const std::string& obstacle_name, 
+                      const std::vector<double>& current_joints = {});
 
     // ---------------------------------------------------------
     // 运动规划接口 (Motion Planning with Trajectory Dynamics)
@@ -355,7 +360,26 @@ public:
      * @param range 采样步长 (弧度，默认 0.01)
      * @param safety_margin 避障安全裕度 (米，默认 0.025)
      * @param collision_coeff 碰撞代价系数 (默认 20.0)
-     * @param planner_type OMPL规划器算法 ("RRTConnect" / "RRTstar" / "PRM")
+    /**
+     * @brief 预先构建/预热 PRM 稠密路标图 (cuRobo PRMGraphPlanner 风格)
+     * @details 在静态工位启动时预先对工作空间进行采样构图，后续在线查询只需毫秒级图搜索 + TrajOpt，替代耗时数秒的重复树搜索
+     * @param warmup_time 预热采样时长 (秒，默认 0.3)
+     * @return 成功返回 true
+     */
+    bool warmupRoadmap(double warmup_time = 0.3);
+
+    /**
+     * @brief 自由空间点到点避障规划 (全动力学轨迹输出)
+     * @param start_joints 起始关节角度 [rad]
+     * @param target_joints 目标关节角度 [rad]
+     * @param trajectory_out 输出完整时间参数化轨迹 (含位置、速度、加速度、时间戳)
+     * @param max_velocity_scaling 最大速度缩放比例 (0.01 ~ 1.0，默认 1.0)
+     * @param max_acceleration_scaling 最大加速度缩放比例 (0.01 ~ 1.0，默认 1.0)
+     * @param planning_time 全局寻路最大超时时间 (秒，默认 10.0)
+     * @param range 采样步长 (弧度，默认 0.01)
+     * @param safety_margin 避障安全裕度 (米，默认 0.025)
+     * @param collision_coeff 碰撞代价系数 (默认 20.0)
+     * @param planner_type OMPL规划器算法 (默认 "PRM"，支持 "PRM" / "RRTConnect" / "RRTstar")
      * @return 成功返回 true
      */
     bool planFreespace(const std::vector<double>& start_joints, 
@@ -367,7 +391,7 @@ public:
                        double range = 0.01,
                        double safety_margin = 0.025,
                        double collision_coeff = 20.0,
-                       const std::string& planner_type = "RRTConnect");
+                       const std::string& planner_type = "PRM");
 
     /**
      * @brief 笛卡尔末端位姿目标自由空间避障规划 (cuRobo 风格多种子 TrajOpt 轮询寻优)
@@ -381,7 +405,7 @@ public:
      * @param range 采样步长 (弧度，默认 0.01)
      * @param safety_margin 避障安全裕度 (米，默认 0.025)
      * @param collision_coeff 碰撞代价系数 (默认 20.0)
-     * @param planner_type OMPL规划器算法 ("RRTConnect" / "RRTstar" / "PRM")
+     * @param planner_type OMPL规划器算法 (默认 "PRM"，支持 "PRM" / "RRTConnect" / "RRTstar")
      * @param max_seeds 最多尝试的无碰撞种子数量 (默认 8)
      * @return 成功返回 true
      */
@@ -394,7 +418,7 @@ public:
                            double range = 0.01,
                            double safety_margin = 0.025,
                            double collision_coeff = 20.0,
-                           const std::string& planner_type = "RRTConnect",
+                           const std::string& planner_type = "PRM",
                            size_t max_seeds = 8);
 
     /**

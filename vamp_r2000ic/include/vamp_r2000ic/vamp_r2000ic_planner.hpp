@@ -72,7 +72,7 @@ public:
      * @param planning_time Maximum allowed time in seconds (default 5.0)
      * @param range Step size / interpolation range (default 0.02)
      * @param safety_margin Extra safety clearance distance in meters (default 0.025)
-     * @param planner_type "RRTConnect" / "RRTstar" / "PRM"
+     * @param planner_type "PRM" / "RRTConnect" / "RRTstar" (default "PRM")
      * @return true on success, false on failure
      */
     bool planFreespace(const std::vector<double>& start_joints,
@@ -81,7 +81,31 @@ public:
                        double planning_time = 5.0,
                        double range = 0.02,
                        double safety_margin = 0.025,
-                       const std::string& planner_type = "RRTConnect");
+                       const std::string& planner_type = "PRM");
+
+    /**
+     * @brief Precompute/warm up the persistent PRM roadmap.
+     * @param warmup_time CPU time budget for growing roadmap in seconds (default 0.3s)
+     */
+    void warmupRoadmap(double warmup_time = 0.3);
+
+    /**
+     * @brief Attach workpiece collision spheres to a robot link for attached-body collision checking.
+     * @param name Unique obstacle/workpiece name
+     * @param link_index Robot link index (e.g. 6 for tool0/flange)
+     * @param spheres Bounding spheres in the link's local coordinate frame
+     */
+    void addAttachedSpheres(const std::string& name, int link_index, const std::vector<Sphere>& spheres);
+
+    /**
+     * @brief Remove attached workpiece spheres when detaching.
+     */
+    bool removeAttachedSpheres(const std::string& name);
+
+    /**
+     * @brief Clear all attached workpiece spheres.
+     */
+    void clearAttachedSpheres();
 
     /**
      * @brief Get direct reference to the collision checker.

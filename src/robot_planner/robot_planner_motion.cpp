@@ -9,6 +9,13 @@ struct TrajectoryBranch {
 };
 } // anonymous namespace
 
+bool RobotPlanner::warmupRoadmap(double warmup_time) {
+    if (pimpl_->backend_ == PlannerBackend::VAMP && pimpl_->vamp_loader_ && pimpl_->vamp_loader_->isLoaded()) {
+        return pimpl_->vamp_loader_->warmupRoadmap(warmup_time);
+    }
+    return true;
+}
+
 bool RobotPlanner::planFreespace(const std::vector<double>& start_joints, 
                                  const std::vector<double>& target_joints, 
                                  JointTrajectory& trajectory_out,
@@ -102,12 +109,12 @@ bool RobotPlanner::planFreespace(const std::vector<double>& start_joints,
             auto rrtstar = std::make_shared<tesseract::motion_planners::RRTstarConfigurator>();
             rrtstar->range = range;
             ompl_planner_config = rrtstar;
-        } else if (planner_type == "PRM" || planner_type == "prm") {
-            ompl_planner_config = std::make_shared<tesseract::motion_planners::PRMConfigurator>();
-        } else {
+        } else if (planner_type == "RRTConnect" || planner_type == "rrtconnect") {
             auto rrtconnect = std::make_shared<tesseract::motion_planners::RRTConnectConfigurator>();
             rrtconnect->range = range;
             ompl_planner_config = rrtconnect;
+        } else {
+            ompl_planner_config = std::make_shared<tesseract::motion_planners::PRMConfigurator>();
         }
         ompl_profile->solver_config.planning_time = planning_time;
         ompl_profile->solver_config.planners = { ompl_planner_config, ompl_planner_config };

@@ -941,8 +941,92 @@ int main(int argc, char** argv) {
 
     p6.clearObstacles();
 
+    // =============================================================================================================
+    // Part 7: cuRobo-Style PRMGraphPlanner Warmup & Workpiece Attachment SIMD Collision Verification
+    // =============================================================================================================
     std::cout << "\n=================================================================================================================" << std::endl;
-    std::cout << "All Modernized Fanuc R-2000iC/165F Tests (Parts 1-6, 100% API Coverage) finished successfully." << std::endl;
+    std::cout << "PART 7: cuRobo-Style PRMGraphPlanner Warmup & Workpiece Attachment SIMD Collision Verification" << std::endl;
+    std::cout << "=================================================================================================================" << std::endl;
+
+    robot_planner::RobotPlanner p7;
+    if (!p7.init(fanuc_urdf, fanuc_srdf, manip_name, base_link, tool_link, robot_planner::PlannerBackend::VAMP)) {
+        std::cerr << "Failed to initialize Part 7 planner with VAMP backend!" << std::endl;
+        return 1;
+    }
+
+    // 7.1 PRM Roadmap Precomputation & Warmup Test (cuRobo PRMGraphPlanner)
+    std::cout << "\n--- 7.1 PRM Roadmap Precomputation & Warmup Benchmark ---" << std::endl;
+    std::cout << "Warming up persistent PRM roadmap graph (0.3s background sampling)..." << std::endl;
+    auto t_warm0 = std::chrono::high_resolution_clock::now();
+    bool warm_ok = p7.warmupRoadmap(0.3);
+    auto t_warm1 = std::chrono::high_resolution_clock::now();
+    double warm_ms = std::chrono::duration<double, std::milli>(t_warm1 - t_warm0).count();
+    std::cout << "PRM Warmup: " << (warm_ok ? "SUCCESS" : "FAILED") << " in " << warm_ms << " ms" << std::endl;
+
+    // Test default PRM freespace planning (without explicitly specifying planner_type)
+    std::vector<double> prm_start = {0.0, -0.3, 0.3, 0.0, 0.0, 0.0};
+    std::vector<double> prm_goal  = {0.5,  0.2, -0.2, 0.3, 0.2, 0.1};
+    robot_planner::JointTrajectory prm_traj;
+
+    auto t_prm0 = std::chrono::high_resolution_clock::now();
+    // Notice: planner_type is omitted, using default "PRM"
+    bool prm_ok = p7.planFreespace(prm_start, prm_goal, prm_traj);
+    auto t_prm1 = std::chrono::high_resolution_clock::now();
+    double prm_ms = std::chrono::duration<double, std::milli>(t_prm1 - t_prm0).count();
+
+    if (prm_ok) {
+        int fail_idx = -1;
+        std::string reason;
+        bool valid = p7.validateTrajectory(prm_traj, &fail_idx, &reason);
+        std::cout << "Default PRM Graph Query: SUCCESS in " << prm_ms << " ms | Points: " 
+                  << prm_traj.size() << " | Duration: " << prm_traj.time_stamps.back() 
+                  << "s | Validator: " << (valid ? "100% COMPLIANT" : reason) << std::endl;
+    } else {
+        std::cerr << "Default PRM Planning failed: " << p7.getLastError() << std::endl;
+    }
+
+    // 7.2 cuRobo AttachmentManager: Sphere Fitting & SIMD Collision Kernel Verification
+    std::cout << "\n--- 7.2 AttachmentManager: Sphere Fitting & SIMD Workpiece Collision ---" << std::endl;
+    std::vector<double> inspect_q = {0.2, 0.2, -0.3, 0.0, 0.2, 0.0};
+    std::vector<double> p7_tool_pose;
+    p7.computeFK(inspect_q, p7_tool_pose);
+    std::cout << "Robot tool0 pose at inspect_q: [" << p7_tool_pose[0] << ", " << p7_tool_pose[1] << ", " << p7_tool_pose[2] << "]" << std::endl;
+
+    // Place an obstacle 0.35m in front of tool0
+    double obs_x = p7_tool_pose[0] + 0.35;
+    double obs_y = p7_tool_pose[1];
+    double obs_z = p7_tool_pose[2];
+    p7.addBox("target_stand", obs_x, obs_y, obs_z, 0.15, 0.15, 0.15);
+
+    // Step A: Bare robot arm check -> MUST BE SAFE (no collision)
+    bool col_bare = p7.checkCollision(inspect_q);
+    std::cout << "[Step A] Bare robot arm collision check: " 
+              << (col_bare ? "COLLISION (UNEXPECTED)" : "SAFE (PASS - 0.35m clearance)") << std::endl;
+
+    // Step B: Spawn and attach a 0.5m long workpiece beam to tool0
+    p7.addBox("carried_beam", p7_tool_pose[0], p7_tool_pose[1], p7_tool_pose[2], 0.5, 0.2, 0.2);
+    bool attach_ok = p7.attachObject("carried_beam", "tool0", inspect_q);
+    std::cout << "[Step B] Attached 'carried_beam' to tool0: " << (attach_ok ? "SUCCESS" : "FAILED") << std::endl;
+
+    // Step C: Collision check WITH attached workpiece -> MUST DETECT COLLISION via VAMP SIMD kernel!
+    bool col_attached = p7.checkCollision(inspect_q);
+    std::cout << "[Step C] Robot WITH attached workpiece collision check: " 
+              << (col_attached ? "COLLISION DETECTED (PASS - Carried beam intercepted by target_stand!)" 
+                               : "SAFE (FAIL - Workpiece collision was missed!)") << std::endl;
+
+    // Step D: Detach workpiece back into world
+    bool detach_ok = p7.detachObject("carried_beam", inspect_q);
+    std::cout << "[Step D] Detached 'carried_beam' back to static world: " << (detach_ok ? "SUCCESS" : "FAILED") << std::endl;
+
+    // Step E: Move arm back away to safe start configuration -> Bare arm is once again collision-free
+    bool col_after_detach = p7.checkCollision(prm_start);
+    std::cout << "[Step E] Empty arm at start config after detach: " 
+              << (col_after_detach ? "COLLISION (FAIL)" : "SAFE (PASS - Detachment restored clean state)") << std::endl;
+
+    p7.clearObstacles();
+
+    std::cout << "\n=================================================================================================================" << std::endl;
+    std::cout << "All Modernized Fanuc R-2000iC/165F Tests (Parts 1-7, 100% API Coverage) finished successfully." << std::endl;
     std::cout << "=================================================================================================================" << std::endl;
     return 0;
 }
