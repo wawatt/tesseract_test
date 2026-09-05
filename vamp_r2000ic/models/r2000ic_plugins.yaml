@@ -1,0 +1,81 @@
+kinematic_plugins:
+  search_paths:
+    - /usr/local/lib
+  search_libraries:
+    - tesseract_kinematics_kdl_factories
+    - tesseract_kinematics_opw_factory
+    - tesseract_kinematics_opw_factories
+  fwd_kin_plugins:
+    manipulator:
+      default: KDLFwdKinChain
+      plugins:
+        KDLFwdKinChain:
+          class: KDLFwdKinChainFactory
+          config:
+            base_link: base_link
+            tip_link: tool0
+    r2000ic_165f:
+      default: KDLFwdKinChain
+      plugins:
+        KDLFwdKinChain:
+          class: KDLFwdKinChainFactory
+          config:
+            base_link: base_link
+            tip_link: tool0
+  inv_kin_plugins:
+    manipulator:
+      default: OPWInvKin
+      plugins:
+        OPWInvKin:
+          class: OPWInvKinFactory
+          config:
+            base_link: base_link
+            tip_link: tool0
+            params:
+              a1: 0.312
+              a2: -0.225
+              b: 0.00
+              c1: 0.670
+              c2: 1.075
+              c3: 1.280
+              c4: 0.215
+              offsets: [0, 0, -1.57079632679, 0, 0, 0]
+              sign_corrections: [1, 1, -1, -1, -1, -1]
+        KDLInvKinChainLMA:
+          class: KDLInvKinChainLMAFactory
+          config:
+            base_link: base_link
+            tip_link: tool0
+        KDLInvKinChainNR:
+          class: KDLInvKinChainNRFactory
+          config:
+            base_link: base_link
+            tip_link: tool0
+    r2000ic_165f:
+      default: OPWInvKin
+      plugins:
+        OPWInvKin:
+          class: OPWInvKinFactory
+          config:
+            base_link: base_link
+            tip_link: tool0
+            params:
+              a1: 0.312
+              a2: -0.225
+              b: 0.00
+              c1: 0.670
+              c2: 1.075
+              c3: 1.280
+              c4: 0.215
+              offsets: [0, 0, -1.57079632679, 0, 0, 0]
+              sign_corrections: [1, 1, -1, -1, -1, -1]
+        KDLInvKinChainLMA:
+          class: KDLInvKinChainLMAFactory
+          config:
+            base_link: base_link
+            tip_link: tool0
+        KDLInvKinChainNR:
+          class: KDLInvKinChainNRFactory
+          config:
+            base_link: base_link
+            tip_link: tool0

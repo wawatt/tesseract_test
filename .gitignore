@@ -3,3 +3,4 @@ build/
 workspace/
 *.ps1
 *.dot
+scratch/

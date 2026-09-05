@@ -13,8 +13,9 @@
 
 1. https://tesseract-docs.readthedocs.io/en/latest/
 2. https://tesseract-robotics.github.io/tesseract/
-3. src/ 文件夹下的样例
+3. D:\build\vcpkg\buildtrees\tesseract*
+4. D:\build\vcpkg\buildtrees\tesseract-planning\src\0.35.0\examples
 
 ## 测试资源
 
-E:\build\tesseract-0.34.1\install\share\tesseract_support
+D:\build\vcpkg\vcpkg_installed\x64-windows\share\tesseract\support

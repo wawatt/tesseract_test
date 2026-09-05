@@ -1,0 +1,53 @@
+<?xml version="1.0" ?>
+<robot name="r2000ic_165f">
+  <group name="manipulator">
+    <chain base_link="base_link" tip_link="tool0" />
+  </group>
+  <group name="r2000ic_165f">
+    <chain base_link="base_link" tip_link="tool0" />
+  </group>
+
+  <group_state name="all_zero" group="manipulator">
+    <joint name="J1" value="0" />
+    <joint name="J2" value="0" />
+    <joint name="J3" value="0" />
+    <joint name="J4" value="0" />
+    <joint name="J5" value="0" />
+    <joint name="J6" value="0" />
+  </group_state>
+  <group_state name="all_zero" group="r2000ic_165f">
+    <joint name="J1" value="0" />
+    <joint name="J2" value="0" />
+    <joint name="J3" value="0" />
+    <joint name="J4" value="0" />
+    <joint name="J5" value="0" />
+    <joint name="J6" value="0" />
+  </group_state>
+
+  <!--Groups kinematic plugins -->
+  <kinematics_plugin_config filename="package://tesseract/support/urdf/r2000ic_plugins.yaml"/>
+
+  <!--Contact Managers plugins -->
+  <contact_managers_plugin_config filename="package://tesseract/support/urdf/contact_manager_plugins.yaml"/>
+
+
+  <!-- Allowed Collision Matrix (ACM): disable adjacent and non-colliding link pairs -->
+  <disable_collisions link1="base_link" link2="J1_link" reason="Adjacent" />
+  <disable_collisions link1="J1_link" link2="J2_link" reason="Adjacent" />
+  <disable_collisions link1="J2_link" link2="J3_link" reason="Adjacent" />
+  <disable_collisions link1="J3_link" link2="J4_link" reason="Adjacent" />
+  <disable_collisions link1="J4_link" link2="J5_link" reason="Adjacent" />
+  <disable_collisions link1="J5_link" link2="J6_link" reason="Adjacent" />
+  <disable_collisions link1="J5_link" link2="flange" reason="Adjacent" />
+  <disable_collisions link1="J6_link" link2="flange" reason="Adjacent" />
+  <disable_collisions link1="flange" link2="tool0" reason="Adjacent" />
+
+  <!-- Links separated by distance / never colliding -->
+  <disable_collisions link1="base_link" link2="J2_link" reason="Never" />
+  <disable_collisions link1="base_link" link2="J3_link" reason="Never" />
+  <disable_collisions link1="J1_link" link2="J3_link" reason="Never" />
+  <disable_collisions link1="J2_link" link2="J4_link" reason="Never" />
+  <disable_collisions link1="J3_link" link2="J5_link" reason="Never" />
+  <disable_collisions link1="J3_link" link2="J6_link" reason="Never" />
+  <disable_collisions link1="J4_link" link2="J6_link" reason="Never" />
+</robot>

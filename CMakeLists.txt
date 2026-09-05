@@ -43,8 +43,11 @@ endif()
 # find_package(RVSBase REQUIRED)
 # find_package(ros_industrial_cmake_boilerplate REQUIRED)
 
-find_package(Boost REQUIRED)
+# OCR Tesseract also installs share/tesseract; load robotics first so
+# tesseract_DIR points at tesseract-robotics (imported targets stay tesseract::*).
+find_package(tesseract-robotics CONFIG REQUIRED)
 find_package(tesseract REQUIRED COMPONENTS common geometry scene_graph state_solver collision srdf urdf kinematics environment visualization support)
+find_package(Boost REQUIRED COMPONENTS program_options filesystem serialization system)
 find_package(tesseract_planning REQUIRED)
 find_package(trajopt_sqp REQUIRED)
 find_package(trajopt_ifopt REQUIRED)
@@ -154,6 +157,9 @@ target_link_libraries(test_robot_planner PRIVATE robot_planner)
 target_include_directories(test_robot_planner PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/include)
 add_test(NAME test_robot_planner COMMAND test_robot_planner)
 set_tests_properties(test_robot_planner PROPERTIES ENVIRONMENT "${TESSERACT_TEST_ENV}")
+
+# Fanuc R-2000iC/165F VAMP SIMD acceleration module
+add_subdirectory(vamp_r2000ic)
 
 # if (MSVC)
 #   # 复制tesseract::tesseract_common 所在文件夹下的所有dll
