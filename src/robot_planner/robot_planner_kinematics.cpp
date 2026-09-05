@@ -184,31 +184,105 @@ bool RobotPlanner::computeAllIK(const std::vector<double>& pose, std::vector<std
     return true;
 }
 
+bool RobotPlanner::computeAllCollisionFreeIK(const std::vector<double>& pose, 
+                                             std::vector<std::vector<double>>& all_solutions_out) {
+    all_solutions_out.clear();
+    std::vector<std::vector<double>> raw_sols;
+    if (!computeAllIK(pose, raw_sols) || raw_sols.empty()) {
+        return false;
+    }
+
+    for (const auto& sol : raw_sols) {
+        if (!checkCollision(sol)) {
+            all_solutions_out.push_back(sol);
+        }
+    }
+
+    if (all_solutions_out.empty()) {
+        pimpl_->setLastError(PlannerStatus::COLLISION_DETECTED, 
+            "Analytical IK solutions exist within limits, but all " + std::to_string(raw_sols.size()) + " candidate solutions collide with obstacles.");
+        return false;
+    }
+
+    pimpl_->setLastError(PlannerStatus::SUCCESS, "");
+    return true;
+}
+
+bool RobotPlanner::computeAllCollisionFreeIK(const std::vector<double>& pose, 
+                                             const std::vector<double>& seed_joint_angles, 
+                                             std::vector<std::vector<double>>& all_solutions_out) {
+    if (!computeAllCollisionFreeIK(pose, all_solutions_out)) {
+        return false;
+    }
+
+    auto dist_sq_func = [&](const std::vector<double>& a) {
+        double d = 0.0;
+        for (size_t j = 0; j < a.size(); ++j) {
+            double diff = a[j] - (j < seed_joint_angles.size() ? seed_joint_angles[j] : 0.0);
+            d += diff * diff;
+        }
+        return d;
+    };
+
+    std::stable_sort(all_solutions_out.begin(), all_solutions_out.end(),
+                     [&](const std::vector<double>& a, const std::vector<double>& b) {
+                         return dist_sq_func(a) < dist_sq_func(b);
+                     });
+
+    pimpl_->setLastError(PlannerStatus::SUCCESS, "");
+    return true;
+}
+
+bool RobotPlanner::computeCollisionFreeIK(const std::vector<double>& pose, 
+                                         const std::vector<double>& seed_joint_angles, 
+                                         std::vector<double>& joint_angles_out) {
+    std::vector<std::vector<double>> collision_free_sols;
+    if (!computeAllCollisionFreeIK(pose, seed_joint_angles, collision_free_sols) || collision_free_sols.empty()) {
+        return false;
+    }
+    joint_angles_out = collision_free_sols.front();
+    pimpl_->setLastError(PlannerStatus::SUCCESS, "");
+    return true;
+}
+
 bool RobotPlanner::computeIK(const std::vector<double>& pose, const std::vector<double>& seed_joint_angles, std::vector<double>& joint_angles_out) {
     if (pose.size() < 7) {
         pimpl_->setLastError(PlannerStatus::INVALID_ARGUMENTS, "Target pose size must be at least 7.");
         return false;
     }
 
-    // 1. Try OPW analytical inverse kinematics with limits check
+    // 1. Try OPW analytical inverse kinematics with limits & collision checks
     std::vector<std::vector<double>> valid_solutions;
     if (computeAllIK(pose, valid_solutions) && !valid_solutions.empty()) {
-        double min_dist_sq = std::numeric_limits<double>::max();
-        size_t best_idx = 0;
-        for (size_t i = 0; i < valid_solutions.size(); ++i) {
-            double dist_sq = 0.0;
-            for (size_t j = 0; j < valid_solutions[i].size(); ++j) {
-                double diff = valid_solutions[i][j] - (j < seed_joint_angles.size() ? seed_joint_angles[j] : 0.0);
-                dist_sq += diff * diff;
+        // Sort all in-limit solutions by distance to seed
+        auto dist_sq_func = [&](const std::vector<double>& a) {
+            double d = 0.0;
+            for (size_t j = 0; j < a.size(); ++j) {
+                double diff = a[j] - (j < seed_joint_angles.size() ? seed_joint_angles[j] : 0.0);
+                d += diff * diff;
             }
-            if (dist_sq < min_dist_sq) {
-                min_dist_sq = dist_sq;
-                best_idx = i;
+            return d;
+        };
+
+        std::stable_sort(valid_solutions.begin(), valid_solutions.end(),
+                         [&](const std::vector<double>& a, const std::vector<double>& b) {
+                             return dist_sq_func(a) < dist_sq_func(b);
+                         });
+
+        // First pass: find closest collision-free solution
+        for (const auto& sol : valid_solutions) {
+            if (!checkCollision(sol)) {
+                joint_angles_out = sol;
+                pimpl_->setLastError(PlannerStatus::SUCCESS, "");
+                return true;
             }
         }
-        joint_angles_out = valid_solutions[best_idx];
-        pimpl_->setLastError(PlannerStatus::SUCCESS, "");
-        return true;
+
+        // If all analytical candidates collide with obstacles, report collision
+        joint_angles_out = valid_solutions.front();
+        pimpl_->setLastError(PlannerStatus::COLLISION_DETECTED, 
+            "Analytical IK solutions exist, but all " + std::to_string(valid_solutions.size()) + " candidate solutions collide with obstacles.");
+        return false;
     }
 
     // 2. Fallback to Tesseract numerical kinematics solver

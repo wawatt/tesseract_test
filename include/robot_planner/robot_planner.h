@@ -129,7 +129,7 @@ public:
     bool computeFKForLink(const std::vector<double>& joint_angles, const std::string& link_name, std::vector<double>& pose_out);
 
     /**
-     * @brief 逆向运动学 (IK, 自动经过 URDF 物理限位过滤)
+     * @brief 逆向运动学 (IK, 自动过滤 URDF 物理限位，并优先返回无碰撞的最小位移解)
      * @param pose 目标位姿 [x, y, z, qx, qy, qz, qw]
      * @param seed_joint_angles 初始参考关节角度 (用于择优最小位移解)
      * @param joint_angles_out 输出求解的关节角度
@@ -144,6 +144,32 @@ public:
      * @return 至少有一个合法解返回 true
      */
     bool computeAllIK(const std::vector<double>& pose, std::vector<std::vector<double>>& all_solutions_out);
+
+    /**
+     * @brief 无碰撞逆向运动学 (同时过滤 URDF 关节限位与全场景障碍物干涉)
+     * @param pose 目标位姿 [x, y, z, qx, qy, qz, qw]
+     * @param seed_joint_angles 初始参考关节角度 (用于择优最小位移解)
+     * @param joint_angles_out 输出求解的无碰撞关节角度
+     * @return 找到合法无碰撞解返回 true
+     */
+    bool computeCollisionFreeIK(const std::vector<double>& pose, const std::vector<double>& seed_joint_angles, std::vector<double>& joint_angles_out);
+
+    /**
+     * @brief 计算所有合法且安全无碰撞的解析逆解集合 (cuRobo 风格多种子解生成器)
+     * @param pose 目标位姿 [x, y, z, qx, qy, qz, qw]
+     * @param all_solutions_out 输出所有符合关节限位且与当前场景无碰撞的解集合 (最多 8 组)
+     * @return 至少存在一个无碰撞解返回 true
+     */
+    bool computeAllCollisionFreeIK(const std::vector<double>& pose, std::vector<std::vector<double>>& all_solutions_out);
+
+    /**
+     * @brief 计算所有合法且安全无碰撞的解析逆解集合，并按与参考种子角度的距离升序排列
+     * @param pose 目标位姿 [x, y, z, qx, qy, qz, qw]
+     * @param seed_joint_angles 参考种子关节角度
+     * @param all_solutions_out 输出按接近参考点排序的无碰撞解集合
+     * @return 至少存在一个无碰撞解返回 true
+     */
+    bool computeAllCollisionFreeIK(const std::vector<double>& pose, const std::vector<double>& seed_joint_angles, std::vector<std::vector<double>>& all_solutions_out);
 
     /**
      * @brief 计算指定关节状态下末端或指定连杆的 6xN 几何雅可比矩阵
@@ -342,6 +368,34 @@ public:
                        double safety_margin = 0.025,
                        double collision_coeff = 20.0,
                        const std::string& planner_type = "RRTConnect");
+
+    /**
+     * @brief 笛卡尔末端位姿目标自由空间避障规划 (cuRobo 风格多种子 TrajOpt 轮询寻优)
+     * @details 解析目标位姿的所有 OPW 无碰撞候选解 (最多 8 组)，按离起始位形近邻排序依次尝试优化，规避单一解陷入局部坏盆地 (bad basin)
+     * @param start_joints 起始关节角度 [rad]
+     * @param target_pose 目标位姿 [x, y, z, qx, qy, qz, qw]
+     * @param trajectory_out 输出完整时间参数化轨迹
+     * @param max_velocity_scaling 最大速度缩放比例 (0.01 ~ 1.0，默认 1.0)
+     * @param max_acceleration_scaling 最大加速度缩放比例 (0.01 ~ 1.0，默认 1.0)
+     * @param planning_time 全局寻路最大超时时间 (秒，默认 10.0)
+     * @param range 采样步长 (弧度，默认 0.01)
+     * @param safety_margin 避障安全裕度 (米，默认 0.025)
+     * @param collision_coeff 碰撞代价系数 (默认 20.0)
+     * @param planner_type OMPL规划器算法 ("RRTConnect" / "RRTstar" / "PRM")
+     * @param max_seeds 最多尝试的无碰撞种子数量 (默认 8)
+     * @return 成功返回 true
+     */
+    bool planFreespacePose(const std::vector<double>& start_joints, 
+                           const std::vector<double>& target_pose, 
+                           JointTrajectory& trajectory_out,
+                           double max_velocity_scaling = 1.0,
+                           double max_acceleration_scaling = 1.0,
+                           double planning_time = 10.0,
+                           double range = 0.01,
+                           double safety_margin = 0.025,
+                           double collision_coeff = 20.0,
+                           const std::string& planner_type = "RRTConnect",
+                           size_t max_seeds = 8);
 
     /**
      * @brief 笛卡尔直线规划 (线性插补，带奇异点检测与动力学时间参数化)
