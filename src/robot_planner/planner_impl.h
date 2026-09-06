@@ -110,7 +110,11 @@ struct RobotPlanner::Impl {
 
     // Optional dynamic loader for vamp_r2000ic.dll
     std::unique_ptr<VampDynamicLoader> vamp_loader_;
-    PlannerBackend backend_ = PlannerBackend::TESSERACT;
+    PlannerBackend backend_ = PlannerBackend::VAMP;
+
+    bool vampReady() const {
+        return vamp_loader_ && vamp_loader_->isLoaded();
+    }
 
     opw_kinematics::Parameters<double> opw_params_ = OpwKinematics::getFanucR2000iCParameters();
     std::vector<double> joint_origins_xyz_;

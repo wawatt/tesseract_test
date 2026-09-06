@@ -176,6 +176,25 @@ VAMP_EXPORT int vamp_r2000ic_plan_trajectory(VampPlannerHandle handle,
  * @param warmup_time Time in seconds to grow roadmap.
  * @return 1 on success, 0 on failure.
  */
+/**
+ * @brief Time-optimal parameterization of an existing geometric joint path via TOPP-RA.
+ * @param waypoints_flat Flat array of size (num_waypoints * 6).
+ * @param num_waypoints Number of geometric waypoints.
+ * @param sample_dt Output sampling step in seconds (e.g. 0.01).
+ */
+VAMP_EXPORT int vamp_r2000ic_parameterize(VampPlannerHandle handle,
+                                          const double* waypoints_flat,
+                                          int num_waypoints,
+                                          double* out_positions,
+                                          double* out_velocities,
+                                          double* out_accelerations,
+                                          double* out_time_stamps,
+                                          int* out_num_points,
+                                          int max_points,
+                                          double max_vel_scaling,
+                                          double max_acc_scaling,
+                                          double sample_dt);
+
 VAMP_EXPORT int vamp_r2000ic_warmup_roadmap(VampPlannerHandle handle, double warmup_time);
 
 /**

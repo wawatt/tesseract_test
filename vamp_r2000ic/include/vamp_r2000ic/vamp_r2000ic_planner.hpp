@@ -120,6 +120,15 @@ public:
                         const std::string& planner_type = "PRM");
 
     /**
+     * @brief Time-optimal parameterization of an existing geometric joint path via TOPP-RA.
+     */
+    bool parameterize(const std::vector<std::vector<double>>& waypoints,
+                      TimedTrajectory& trajectory_out,
+                      double max_velocity_scaling = 1.0,
+                      double max_acceleration_scaling = 1.0,
+                      double sample_dt = 0.01);
+
+    /**
      * @brief Precompute/warm up the persistent PRM roadmap.
      * @param warmup_time CPU time budget for growing roadmap in seconds (default 0.3s)
      */

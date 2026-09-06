@@ -308,18 +308,32 @@ bool VampR2000icPlanner::planTrajectory(const std::vector<double>& start_joints,
         }
     }
 
-    // Step 3: TOPP-RA time-optimal parameterization
+    return parameterize(opt_waypoints, trajectory_out, max_velocity_scaling, max_acceleration_scaling);
+}
+
+bool VampR2000icPlanner::parameterize(const std::vector<std::vector<double>>& waypoints,
+                                      TimedTrajectory& trajectory_out,
+                                      double max_velocity_scaling,
+                                      double max_acceleration_scaling,
+                                      double sample_dt) {
+    trajectory_out.clear();
+    if (waypoints.size() < 2) {
+        return false;
+    }
+
     VampToppra toppra_opt;
     toppra_opt.setLimits(pimpl_->vel_limits_, pimpl_->acc_limits_);
-    bool toppra_ok = toppra_opt.parameterize(opt_waypoints, trajectory_out, max_velocity_scaling, max_acceleration_scaling, 0.01);
-    if (!toppra_ok || trajectory_out.empty()) {
-        // Fallback: assign uniform timestamps over the optimized geometric waypoints
-        double dt = 0.02;
-        trajectory_out.positions = opt_waypoints;
-        trajectory_out.time_stamps.resize(rows);
-        for (int i = 0; i < rows; ++i) {
-            trajectory_out.time_stamps[i] = i * dt;
-        }
+    if (toppra_opt.parameterize(waypoints, trajectory_out, max_velocity_scaling, max_acceleration_scaling, sample_dt)
+        && !trajectory_out.empty()) {
+        return true;
+    }
+
+    // Fallback: uniform timestamps if TOPP-RA cannot solve (e.g. fewer than 3 waypoints)
+    const double dt = 0.02;
+    trajectory_out.positions = waypoints;
+    trajectory_out.time_stamps.resize(waypoints.size());
+    for (size_t i = 0; i < waypoints.size(); ++i) {
+        trajectory_out.time_stamps[i] = static_cast<double>(i) * dt;
     }
     return true;
 }

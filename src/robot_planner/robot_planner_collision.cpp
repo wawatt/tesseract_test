@@ -61,53 +61,17 @@ bool RobotPlanner::checkCollisionDetailed(const std::vector<double>& joint_angle
 
 bool RobotPlanner::checkCollision(const std::vector<double>& joint_angles) {
     pimpl_->last_known_joints_ = joint_angles;
-    if (pimpl_->backend_ == PlannerBackend::VAMP && pimpl_->vamp_loader_ && joint_angles.size() == 6) {
-        bool col = pimpl_->vamp_loader_->checkCollision(joint_angles);
-        if (col) {
-            pimpl_->setLastError(PlannerStatus::COLLISION_DETECTED, "Collision detected by VAMP SIMD engine.");
-            return true;
-        } else {
-            pimpl_->setLastError(PlannerStatus::SUCCESS, "");
-            return false;
-        }
-    }
-    if (!pimpl_->env_) {
-        pimpl_->setLastError(PlannerStatus::NOT_INITIALIZED, "Environment not initialized.");
+    if (!pimpl_->vampReady() || joint_angles.size() != 6) {
+        pimpl_->setLastError(PlannerStatus::NOT_INITIALIZED, "VAMP backend is not loaded or joint vector is not 6-DOF.");
         return false;
     }
-    
-    auto active_link_names = pimpl_->env_->getActiveLinkNames();
-    std::vector<std::string> joint_names = pimpl_->env_->getJointGroup(pimpl_->manipulator_name_)->getJointNames();
-    
-    if (joint_angles.size() != joint_names.size()) {
-        pimpl_->setLastError(PlannerStatus::INVALID_ARGUMENTS, "joint_angles size mismatch.");
-        return false;
-    }
-    Eigen::VectorXd joints = Eigen::Map<const Eigen::VectorXd>(joint_angles.data(), joint_angles.size());
-    
-    tesseract::scene_graph::SceneState state = pimpl_->env_->getState(joint_names, joints);
-    
-    tesseract::collision::DiscreteContactManager::Ptr manager = pimpl_->env_->getDiscreteContactManager();
-    manager->setActiveCollisionObjects(active_link_names);
-    manager->setCollisionObjectsTransform(state.link_transforms);
-    
-    tesseract::collision::ContactResultMap contact_results;
-    manager->contactTest(contact_results, tesseract::collision::ContactTestType::FIRST);
-    
-    bool col = !contact_results.empty();
+    bool col = pimpl_->vamp_loader_->checkCollision(joint_angles);
     if (col) {
-        std::string detail = "Collision detected by Tesseract DiscreteContactManager.";
-        auto it = contact_results.begin();
-        if (it != contact_results.end() && !it->second.empty()) {
-            const auto& c = it->second.front();
-            detail = "Collision detected between '" + c.link_names[0] + "' and '" + c.link_names[1] + 
-                     "' (distance: " + std::to_string(c.distance) + "m).";
-        }
-        pimpl_->setLastError(PlannerStatus::COLLISION_DETECTED, detail);
-    } else {
-        pimpl_->setLastError(PlannerStatus::SUCCESS, "");
+        pimpl_->setLastError(PlannerStatus::COLLISION_DETECTED, "Collision detected by VAMP SIMD engine.");
+        return true;
     }
-    return col;
+    pimpl_->setLastError(PlannerStatus::SUCCESS, "");
+    return false;
 }
 
 bool RobotPlanner::validateTrajectory(const JointTrajectory& trajectory, 
@@ -197,7 +161,7 @@ bool RobotPlanner::validateTrajectory(const JointTrajectory& trajectory,
             }
         }
 
-        // 5. Collision check (using AVX2 SIMD in VAMP mode, or ContactManager in Tesseract mode)
+        // 5. Collision check (VAMP AVX2 SIMD)
         if (checkCollision(pos)) {
             std::string msg = "Waypoint " + std::to_string(i) + ": " + pimpl_->last_error_;
             pimpl_->setLastError(PlannerStatus::COLLISION_DETECTED, msg);

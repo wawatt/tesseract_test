@@ -107,9 +107,11 @@ static std::vector<double> fitSpheresToObject(const ObstacleGeometryInfo& geom, 
 }
 
 bool RobotPlanner::addBox(const std::string& name, double x, double y, double z, double dim_x, double dim_y, double dim_z) {
-    if (pimpl_->vamp_loader_ && pimpl_->vamp_loader_->isLoaded()) {
-        pimpl_->vamp_loader_->addBox(name, x, y, z, dim_x, dim_y, dim_z);
+    if (!pimpl_->vampReady()) {
+        pimpl_->setLastError(PlannerStatus::NOT_INITIALIZED, "VAMP backend is not loaded.");
+        return false;
     }
+    pimpl_->vamp_loader_->addBox(name, x, y, z, dim_x, dim_y, dim_z);
     pimpl_->obstacle_names_.insert(name);
 
     ObstacleGeometryInfo geom;
@@ -122,37 +124,8 @@ bool RobotPlanner::addBox(const std::string& name, double x, double y, double z,
     geom.dim_z = dim_z;
     pimpl_->obstacle_geometries_[name] = geom;
 
-    // In VAMP mode, bypass Tesseract SceneGraph manipulation completely
-    if (pimpl_->backend_ == PlannerBackend::VAMP) {
-        pimpl_->setLastError(PlannerStatus::SUCCESS, "");
-        return true;
-    }
-
-    if (!pimpl_->env_) return false;
-    
-    tesseract::scene_graph::Link link(name);
-    
-    tesseract::scene_graph::Visual::Ptr visual = std::make_shared<tesseract::scene_graph::Visual>();
-    visual->origin = Eigen::Isometry3d::Identity();
-    visual->geometry = std::make_shared<tesseract::geometry::Box>(dim_x, dim_y, dim_z);
-    link.visual.push_back(visual);
-    
-    tesseract::scene_graph::Collision::Ptr collision = std::make_shared<tesseract::scene_graph::Collision>();
-    collision->origin = visual->origin;
-    collision->geometry = visual->geometry;
-    link.collision.push_back(collision);
-    
-    tesseract::scene_graph::Joint joint(name + "_joint");
-    joint.parent_link_name = pimpl_->env_->getRootLinkName();
-    joint.child_link_name = name;
-    joint.type = tesseract::scene_graph::JointType::FIXED;
-    joint.parent_to_joint_origin_transform = Eigen::Isometry3d::Identity();
-    joint.parent_to_joint_origin_transform.translation() = Eigen::Vector3d(x, y, z);
-    
-    auto cmd = std::make_shared<tesseract::environment::AddLinkCommand>(link, joint);
-    bool ok = pimpl_->env_->applyCommand(cmd);
-    pimpl_->setLastError(ok ? PlannerStatus::SUCCESS : PlannerStatus::INTERNAL_ERROR, ok ? "" : "Failed to add Box link.");
-    return ok;
+    pimpl_->setLastError(PlannerStatus::SUCCESS, "");
+    return true;
 }
 
 bool RobotPlanner::addSphere(const std::string& name, double x, double y, double z, double radius) {
@@ -160,10 +133,12 @@ bool RobotPlanner::addSphere(const std::string& name, double x, double y, double
         pimpl_->setLastError(PlannerStatus::INVALID_ARGUMENTS, "Sphere radius must be positive.");
         return false;
     }
-    if (pimpl_->vamp_loader_ && pimpl_->vamp_loader_->isLoaded()) {
-        double d = 2.0 * radius;
-        pimpl_->vamp_loader_->addBox(name, x, y, z, d, d, d);
+    if (!pimpl_->vampReady()) {
+        pimpl_->setLastError(PlannerStatus::NOT_INITIALIZED, "VAMP backend is not loaded.");
+        return false;
     }
+    double d = 2.0 * radius;
+    pimpl_->vamp_loader_->addBox(name, x, y, z, d, d, d);
     pimpl_->obstacle_names_.insert(name);
 
     ObstacleGeometryInfo geom;
@@ -174,36 +149,8 @@ bool RobotPlanner::addSphere(const std::string& name, double x, double y, double
     geom.radius = radius;
     pimpl_->obstacle_geometries_[name] = geom;
 
-    // In VAMP mode, bypass Tesseract SceneGraph manipulation completely
-    if (pimpl_->backend_ == PlannerBackend::VAMP) {
-        pimpl_->setLastError(PlannerStatus::SUCCESS, "");
-        return true;
-    }
-
-    if (!pimpl_->env_) return false;
-
-    tesseract::scene_graph::Link link(name);
-    auto visual = std::make_shared<tesseract::scene_graph::Visual>();
-    visual->origin = Eigen::Isometry3d::Identity();
-    visual->geometry = std::make_shared<tesseract::geometry::Sphere>(radius);
-    link.visual.push_back(visual);
-
-    auto collision = std::make_shared<tesseract::scene_graph::Collision>();
-    collision->origin = visual->origin;
-    collision->geometry = visual->geometry;
-    link.collision.push_back(collision);
-
-    tesseract::scene_graph::Joint joint(name + "_joint");
-    joint.parent_link_name = pimpl_->env_->getRootLinkName();
-    joint.child_link_name = name;
-    joint.type = tesseract::scene_graph::JointType::FIXED;
-    joint.parent_to_joint_origin_transform = Eigen::Isometry3d::Identity();
-    joint.parent_to_joint_origin_transform.translation() = Eigen::Vector3d(x, y, z);
-
-    auto cmd = std::make_shared<tesseract::environment::AddLinkCommand>(link, joint);
-    bool ok = pimpl_->env_->applyCommand(cmd);
-    pimpl_->setLastError(ok ? PlannerStatus::SUCCESS : PlannerStatus::INTERNAL_ERROR, ok ? "" : "Failed to add Sphere link.");
-    return ok;
+    pimpl_->setLastError(PlannerStatus::SUCCESS, "");
+    return true;
 }
 
 bool RobotPlanner::addCylinder(const std::string& name, double radius, double length, const std::vector<double>& pose) {
@@ -218,13 +165,15 @@ bool RobotPlanner::addCylinder(const std::string& name, double radius, double le
         tf.linear() = q.normalized().toRotationMatrix();
     }
 
-    if (pimpl_->vamp_loader_ && pimpl_->vamp_loader_->isLoaded()) {
-        Eigen::Matrix3d R = tf.rotation();
-        Eigen::Vector3d local_half(radius, radius, length * 0.5);
-        Eigen::Vector3d world_half = R.cwiseAbs() * local_half;
-        pimpl_->vamp_loader_->addBox(name, tf.translation().x(), tf.translation().y(), tf.translation().z(),
-                                     2.0 * world_half.x(), 2.0 * world_half.y(), 2.0 * world_half.z());
+    if (!pimpl_->vampReady()) {
+        pimpl_->setLastError(PlannerStatus::NOT_INITIALIZED, "VAMP backend is not loaded.");
+        return false;
     }
+    Eigen::Matrix3d R = tf.rotation();
+    Eigen::Vector3d local_half(radius, radius, length * 0.5);
+    Eigen::Vector3d world_half = R.cwiseAbs() * local_half;
+    pimpl_->vamp_loader_->addBox(name, tf.translation().x(), tf.translation().y(), tf.translation().z(),
+                                 2.0 * world_half.x(), 2.0 * world_half.y(), 2.0 * world_half.z());
     pimpl_->obstacle_names_.insert(name);
 
     ObstacleGeometryInfo geom_cyl;
@@ -235,35 +184,8 @@ bool RobotPlanner::addCylinder(const std::string& name, double radius, double le
     geom_cyl.length = length;
     pimpl_->obstacle_geometries_[name] = geom_cyl;
 
-    // In VAMP mode, bypass Tesseract SceneGraph manipulation completely
-    if (pimpl_->backend_ == PlannerBackend::VAMP) {
-        pimpl_->setLastError(PlannerStatus::SUCCESS, "");
-        return true;
-    }
-
-    if (!pimpl_->env_) return false;
-
-    tesseract::scene_graph::Link link(name);
-    auto visual = std::make_shared<tesseract::scene_graph::Visual>();
-    visual->origin = Eigen::Isometry3d::Identity();
-    visual->geometry = std::make_shared<tesseract::geometry::Cylinder>(radius, length);
-    link.visual.push_back(visual);
-
-    auto collision = std::make_shared<tesseract::scene_graph::Collision>();
-    collision->origin = visual->origin;
-    collision->geometry = visual->geometry;
-    link.collision.push_back(collision);
-
-    tesseract::scene_graph::Joint joint(name + "_joint");
-    joint.parent_link_name = pimpl_->env_->getRootLinkName();
-    joint.child_link_name = name;
-    joint.type = tesseract::scene_graph::JointType::FIXED;
-    joint.parent_to_joint_origin_transform = tf;
-
-    auto cmd = std::make_shared<tesseract::environment::AddLinkCommand>(link, joint);
-    bool ok = pimpl_->env_->applyCommand(cmd);
-    pimpl_->setLastError(ok ? PlannerStatus::SUCCESS : PlannerStatus::INTERNAL_ERROR, ok ? "" : "Failed to add Cylinder link.");
-    return ok;
+    pimpl_->setLastError(PlannerStatus::SUCCESS, "");
+    return true;
 }
 
 bool RobotPlanner::addCapsule(const std::string& name, double radius, double length, const std::vector<double>& pose) {
@@ -278,14 +200,16 @@ bool RobotPlanner::addCapsule(const std::string& name, double radius, double len
         tf.linear() = q.normalized().toRotationMatrix();
     }
 
-    if (pimpl_->vamp_loader_ && pimpl_->vamp_loader_->isLoaded()) {
-        Eigen::Matrix3d R = tf.rotation();
-        double total_half_len = length * 0.5 + radius;
-        Eigen::Vector3d local_half(radius, radius, total_half_len);
-        Eigen::Vector3d world_half = R.cwiseAbs() * local_half;
-        pimpl_->vamp_loader_->addBox(name, tf.translation().x(), tf.translation().y(), tf.translation().z(),
-                                     2.0 * world_half.x(), 2.0 * world_half.y(), 2.0 * world_half.z());
+    if (!pimpl_->vampReady()) {
+        pimpl_->setLastError(PlannerStatus::NOT_INITIALIZED, "VAMP backend is not loaded.");
+        return false;
     }
+    Eigen::Matrix3d R = tf.rotation();
+    double total_half_len = length * 0.5 + radius;
+    Eigen::Vector3d local_half(radius, radius, total_half_len);
+    Eigen::Vector3d world_half = R.cwiseAbs() * local_half;
+    pimpl_->vamp_loader_->addBox(name, tf.translation().x(), tf.translation().y(), tf.translation().z(),
+                                 2.0 * world_half.x(), 2.0 * world_half.y(), 2.0 * world_half.z());
     pimpl_->obstacle_names_.insert(name);
 
     ObstacleGeometryInfo geom_cap;
@@ -296,35 +220,8 @@ bool RobotPlanner::addCapsule(const std::string& name, double radius, double len
     geom_cap.length = length;
     pimpl_->obstacle_geometries_[name] = geom_cap;
 
-    // In VAMP mode, bypass Tesseract SceneGraph manipulation completely
-    if (pimpl_->backend_ == PlannerBackend::VAMP) {
-        pimpl_->setLastError(PlannerStatus::SUCCESS, "");
-        return true;
-    }
-
-    if (!pimpl_->env_) return false;
-
-    tesseract::scene_graph::Link link(name);
-    auto visual = std::make_shared<tesseract::scene_graph::Visual>();
-    visual->origin = Eigen::Isometry3d::Identity();
-    visual->geometry = std::make_shared<tesseract::geometry::Capsule>(radius, length);
-    link.visual.push_back(visual);
-
-    auto collision = std::make_shared<tesseract::scene_graph::Collision>();
-    collision->origin = visual->origin;
-    collision->geometry = visual->geometry;
-    link.collision.push_back(collision);
-
-    tesseract::scene_graph::Joint joint(name + "_joint");
-    joint.parent_link_name = pimpl_->env_->getRootLinkName();
-    joint.child_link_name = name;
-    joint.type = tesseract::scene_graph::JointType::FIXED;
-    joint.parent_to_joint_origin_transform = tf;
-
-    auto cmd = std::make_shared<tesseract::environment::AddLinkCommand>(link, joint);
-    bool ok = pimpl_->env_->applyCommand(cmd);
-    pimpl_->setLastError(ok ? PlannerStatus::SUCCESS : PlannerStatus::INTERNAL_ERROR, ok ? "" : "Failed to add Capsule link.");
-    return ok;
+    pimpl_->setLastError(PlannerStatus::SUCCESS, "");
+    return true;
 }
 
 bool RobotPlanner::addMesh(const std::string& name,
@@ -340,11 +237,12 @@ bool RobotPlanner::addMesh(const std::string& name,
         return false;
     }
 
-    std::vector<double> aabbs;
-    if (pimpl_->vamp_loader_ && pimpl_->vamp_loader_->isLoaded()) {
-        aabbs = convertMeshToAABBs(vertices, faces, pose, 0.04);
-        pimpl_->vamp_loader_->addBoxes(name, aabbs);
+    if (!pimpl_->vampReady()) {
+        pimpl_->setLastError(PlannerStatus::NOT_INITIALIZED, "VAMP backend is not loaded.");
+        return false;
     }
+    std::vector<double> aabbs = convertMeshToAABBs(vertices, faces, pose, 0.04);
+    pimpl_->vamp_loader_->addBoxes(name, aabbs);
     pimpl_->obstacle_names_.insert(name);
 
     ObstacleGeometryInfo geom_mesh;
@@ -357,64 +255,20 @@ bool RobotPlanner::addMesh(const std::string& name,
     geom_mesh.aabb_array = aabbs;
     pimpl_->obstacle_geometries_[name] = geom_mesh;
 
-    // In VAMP mode, bypass Tesseract SceneGraph manipulation completely
-    if (pimpl_->backend_ == PlannerBackend::VAMP) {
-        pimpl_->setLastError(PlannerStatus::SUCCESS, "");
-        return true;
-    }
-
-    if (!pimpl_->env_) return false;
-
-    auto mesh_vertices = std::make_shared<tesseract::common::VectorVector3d>();
-    for (size_t i = 0; i + 2 < vertices.size(); i += 3) {
-        mesh_vertices->emplace_back(vertices[i], vertices[i+1], vertices[i+2]);
-    }
-
-    int num_triangles = faces.size() / 3;
-    auto mesh_faces = std::make_shared<Eigen::VectorXi>(num_triangles * 4);
-    for (int i = 0; i < num_triangles; ++i) {
-        (*mesh_faces)[i * 4 + 0] = 3;
-        (*mesh_faces)[i * 4 + 1] = faces[i * 3 + 0];
-        (*mesh_faces)[i * 4 + 2] = faces[i * 3 + 1];
-        (*mesh_faces)[i * 4 + 3] = faces[i * 3 + 2];
-    }
-
-    tesseract::scene_graph::Link link(name);
-    
-    tesseract::scene_graph::Visual::Ptr visual = std::make_shared<tesseract::scene_graph::Visual>();
-    visual->origin = Eigen::Isometry3d::Identity();
-    visual->geometry = std::make_shared<tesseract::geometry::Mesh>(mesh_vertices, mesh_faces);
-    link.visual.push_back(visual);
-    
-    tesseract::scene_graph::Collision::Ptr collision = std::make_shared<tesseract::scene_graph::Collision>();
-    collision->origin = visual->origin;
-    collision->geometry = visual->geometry;
-    link.collision.push_back(collision);
-    
-    tesseract::scene_graph::Joint joint(name + "_joint");
-    joint.parent_link_name = pimpl_->env_->getRootLinkName();
-    joint.child_link_name = name;
-    joint.type = tesseract::scene_graph::JointType::FIXED;
-    joint.parent_to_joint_origin_transform = Eigen::Isometry3d::Identity();
-    joint.parent_to_joint_origin_transform.translation() = Eigen::Vector3d(pose[0], pose[1], pose[2]);
-    Eigen::Quaterniond q(pose[6], pose[3], pose[4], pose[5]);
-    joint.parent_to_joint_origin_transform.linear() = q.matrix();
-    
-    auto cmd = std::make_shared<tesseract::environment::AddLinkCommand>(link, joint);
-    bool ok = pimpl_->env_->applyCommand(cmd);
-    pimpl_->setLastError(ok ? PlannerStatus::SUCCESS : PlannerStatus::INTERNAL_ERROR, ok ? "" : "Failed to add Mesh link.");
-    return ok;
+    pimpl_->setLastError(PlannerStatus::SUCCESS, "");
+    return true;
 }
 
 bool RobotPlanner::addPointCloud(const std::string& name,
                                  const std::vector<double>& points,
                                  double resolution,
                                  const std::vector<double>& pose) {
-    std::vector<double> aabbs;
-    if (pimpl_->vamp_loader_ && pimpl_->vamp_loader_->isLoaded()) {
-        aabbs = convertPointCloudToAABBs(points, resolution, pose);
-        pimpl_->vamp_loader_->addBoxes(name, aabbs);
+    if (!pimpl_->vampReady()) {
+        pimpl_->setLastError(PlannerStatus::NOT_INITIALIZED, "VAMP backend is not loaded.");
+        return false;
     }
+    std::vector<double> aabbs = convertPointCloudToAABBs(points, resolution, pose);
+    pimpl_->vamp_loader_->addBoxes(name, aabbs);
     pimpl_->obstacle_names_.insert(name);
 
     ObstacleGeometryInfo geom_pc;
@@ -427,47 +281,8 @@ bool RobotPlanner::addPointCloud(const std::string& name,
     geom_pc.aabb_array = aabbs;
     pimpl_->obstacle_geometries_[name] = geom_pc;
 
-    // In VAMP mode, bypass Tesseract SceneGraph manipulation completely
-    if (pimpl_->backend_ == PlannerBackend::VAMP) {
-        pimpl_->setLastError(PlannerStatus::SUCCESS, "");
-        return true;
-    }
-
-    if (!pimpl_->env_) return false;
-    
-    tesseract::geometry::PointCloud point_cloud;
-    for (size_t i = 0; i + 2 < points.size(); i += 3) {
-        point_cloud.addPoint(points[i], points[i+1], points[i+2]);
-    }
-
-    auto octree = tesseract::geometry::createOctree(point_cloud, resolution, true, true);
-    auto shared_octree = std::shared_ptr<const octomap::OcTree>(octree.release());
-    
-    tesseract::scene_graph::Link link(name);
-    
-    tesseract::scene_graph::Visual::Ptr visual = std::make_shared<tesseract::scene_graph::Visual>();
-    visual->origin = Eigen::Isometry3d::Identity();
-    visual->geometry = std::make_shared<tesseract::geometry::Octree>(shared_octree, tesseract::geometry::OctreeSubType::BOX);
-    link.visual.push_back(visual);
-    
-    tesseract::scene_graph::Collision::Ptr collision = std::make_shared<tesseract::scene_graph::Collision>();
-    collision->origin = visual->origin;
-    collision->geometry = visual->geometry;
-    link.collision.push_back(collision);
-    
-    tesseract::scene_graph::Joint joint(name + "_joint");
-    joint.parent_link_name = pimpl_->env_->getRootLinkName();
-    joint.child_link_name = name;
-    joint.type = tesseract::scene_graph::JointType::FIXED;
-    joint.parent_to_joint_origin_transform = Eigen::Isometry3d::Identity();
-    joint.parent_to_joint_origin_transform.translation() = Eigen::Vector3d(pose[0], pose[1], pose[2]);
-    Eigen::Quaterniond q(pose[6], pose[3], pose[4], pose[5]);
-    joint.parent_to_joint_origin_transform.linear() = q.matrix();
-    
-    auto cmd = std::make_shared<tesseract::environment::AddLinkCommand>(link, joint);
-    bool ok = pimpl_->env_->applyCommand(cmd);
-    pimpl_->setLastError(ok ? PlannerStatus::SUCCESS : PlannerStatus::INTERNAL_ERROR, ok ? "" : "Failed to add PointCloud link.");
-    return ok;
+    pimpl_->setLastError(PlannerStatus::SUCCESS, "");
+    return true;
 }
 
 bool RobotPlanner::setAllowedCollision(const std::string& link1, const std::string& link2, bool allowed) {
@@ -506,26 +321,15 @@ bool RobotPlanner::isCollisionAllowed(const std::string& link1, const std::strin
 }
 
 bool RobotPlanner::removeObstacle(const std::string& name) {
-    if (pimpl_->vamp_loader_ && pimpl_->vamp_loader_->isLoaded()) {
+    if (pimpl_->vampReady()) {
         pimpl_->vamp_loader_->removeObstacle(name);
         pimpl_->vamp_loader_->removeAttachedSpheres(name);
     }
     pimpl_->obstacle_names_.erase(name);
     pimpl_->attached_obstacles_.erase(name);
     pimpl_->obstacle_geometries_.erase(name);
-
-    // In VAMP mode, bypass Tesseract SceneGraph manipulation completely
-    if (pimpl_->backend_ == PlannerBackend::VAMP) {
-        pimpl_->setLastError(PlannerStatus::SUCCESS, "");
-        return true;
-    }
-
-    if (!pimpl_->env_) return false;
-    
-    auto cmd = std::make_shared<tesseract::environment::RemoveLinkCommand>(name);
-    bool ok = pimpl_->env_->applyCommand(cmd);
-    pimpl_->setLastError(ok ? PlannerStatus::SUCCESS : PlannerStatus::OBSTACLE_NOT_FOUND, ok ? "" : "Failed to remove link.");
-    return ok;
+    pimpl_->setLastError(PlannerStatus::SUCCESS, "");
+    return true;
 }
 
 bool RobotPlanner::clearObstacles() {
@@ -598,55 +402,9 @@ bool RobotPlanner::attachObject(const std::string& obstacle_name, const std::str
     }
 
     Eigen::Isometry3d target_tf = it_target->second;
-    Eigen::Isometry3d rel_tf = target_tf.inverse() * obs_tf;
     pimpl_->attached_obstacles_[obstacle_name] = actual_link;
 
-    if (pimpl_->backend_ == PlannerBackend::VAMP) {
-        if (pimpl_->vamp_loader_ && pimpl_->vamp_loader_->isLoaded()) {
-            if (it_geom != pimpl_->obstacle_geometries_.end()) {
-                int link_idx = mapLinkNameToIndex(actual_link);
-                std::string vamp_link_name = (link_idx >= 6) ? "J6_link" : ("J" + std::to_string(link_idx) + "_link");
-                if (link_idx == 0) vamp_link_name = "base_link";
-
-                auto it_vamp_link = current_state.link_transforms.find(vamp_link_name);
-                Eigen::Isometry3d vamp_link_tf = (it_vamp_link != current_state.link_transforms.end()) ? it_vamp_link->second : target_tf;
-                Eigen::Isometry3d rel_tf_vamp = vamp_link_tf.inverse() * obs_tf;
-
-                std::vector<double> fitted_spheres = fitSpheresToObject(it_geom->second, rel_tf_vamp);
-                if (!fitted_spheres.empty()) {
-                    pimpl_->vamp_loader_->addAttachedSpheres(obstacle_name, link_idx, fitted_spheres.data(), static_cast<int>(fitted_spheres.size() / 4));
-                }
-            }
-            pimpl_->vamp_loader_->removeObstacle(obstacle_name);
-        }
-        pimpl_->setLastError(PlannerStatus::SUCCESS, "");
-        return true;
-    }
-
-    tesseract::environment::Commands cmds;
-    tesseract::scene_graph::Joint joint(obstacle_name + "_joint");
-    joint.parent_link_name = actual_link;
-    joint.child_link_name = obstacle_name;
-    joint.type = tesseract::scene_graph::JointType::FIXED;
-    joint.parent_to_joint_origin_transform = rel_tf;
-    cmds.push_back(std::make_shared<tesseract::environment::MoveLinkCommand>(joint));
-
-    // 挂载后允许物体与挂载工具连杆免检，防止自我碰撞误报
-    tesseract::common::AllowedCollisionMatrix acm;
-    acm.addAllowedCollision(obstacle_name, actual_link, "Attached");
-    cmds.push_back(std::make_shared<tesseract::environment::ModifyAllowedCollisionsCommand>(
-        acm, tesseract::environment::ModifyAllowedCollisionsType::ADD));
-
-    if (!pimpl_->env_->applyCommands(cmds)) {
-        pimpl_->setLastError(PlannerStatus::INTERNAL_ERROR, "Failed to apply MoveLinkCommand in Tesseract.");
-        return false;
-    }
-
-    pimpl_->attached_obstacles_[obstacle_name] = actual_link;
-
-    // VAMP SIMD Collision Kernel Attachment Synchronization (cuRobo AttachmentManager)
-    if (pimpl_->vamp_loader_ && pimpl_->vamp_loader_->isLoaded()) {
-        auto it_geom = pimpl_->obstacle_geometries_.find(obstacle_name);
+    if (pimpl_->vampReady()) {
         if (it_geom != pimpl_->obstacle_geometries_.end()) {
             int link_idx = mapLinkNameToIndex(actual_link);
             std::string vamp_link_name = (link_idx >= 6) ? "J6_link" : ("J" + std::to_string(link_idx) + "_link");
@@ -661,10 +419,8 @@ bool RobotPlanner::attachObject(const std::string& obstacle_name, const std::str
                 pimpl_->vamp_loader_->addAttachedSpheres(obstacle_name, link_idx, fitted_spheres.data(), static_cast<int>(fitted_spheres.size() / 4));
             }
         }
-        // CRUCIAL: Remove the static obstacle from the world collision space so the robot doesn't collide with its own ghost
         pimpl_->vamp_loader_->removeObstacle(obstacle_name);
     }
-
     pimpl_->setLastError(PlannerStatus::SUCCESS, "");
     return true;
 }
@@ -701,89 +457,33 @@ bool RobotPlanner::detachObject(const std::string& obstacle_name, const std::vec
     auto it_target = current_state.link_transforms.find(attached_link);
     Eigen::Isometry3d target_tf = (it_target != current_state.link_transforms.end()) ? it_target->second : Eigen::Isometry3d::Identity();
 
-    if (pimpl_->backend_ == PlannerBackend::VAMP) {
-        pimpl_->attached_obstacles_.erase(it_attached);
-        if (pimpl_->vamp_loader_ && pimpl_->vamp_loader_->isLoaded()) {
-            pimpl_->vamp_loader_->removeAttachedSpheres(obstacle_name);
-            if (it_geom != pimpl_->obstacle_geometries_.end()) {
-                const auto& g = it_geom->second;
-                Eigen::Isometry3d world_tf = target_tf;
-                if (g.type == ObstacleShapeType::BOX) {
-                    pimpl_->vamp_loader_->addBox(obstacle_name, world_tf.translation().x(), world_tf.translation().y(), world_tf.translation().z(),
-                                                 g.dim_x, g.dim_y, g.dim_z);
-                } else if (g.type == ObstacleShapeType::SPHERE) {
-                    double d = 2.0 * g.radius;
-                    pimpl_->vamp_loader_->addBox(obstacle_name, world_tf.translation().x(), world_tf.translation().y(), world_tf.translation().z(),
-                                                 d, d, d);
-                }
-            }
-        }
-        pimpl_->setLastError(PlannerStatus::SUCCESS, "");
-        return true;
-    }
-
-    auto it_obs = current_state.link_transforms.find(obstacle_name);
-    if (it_obs == current_state.link_transforms.end()) {
-        pimpl_->setLastError(PlannerStatus::INTERNAL_ERROR, "Failed to query link transform for detaching.");
-        return false;
-    }
-    Eigen::Isometry3d world_tf = it_obs->second;
-
-    tesseract::environment::Commands cmds;
-    tesseract::scene_graph::Joint joint(obstacle_name + "_joint");
-    joint.parent_link_name = pimpl_->env_->getRootLinkName();
-    joint.child_link_name = obstacle_name;
-    joint.type = tesseract::scene_graph::JointType::FIXED;
-    joint.parent_to_joint_origin_transform = world_tf;
-    cmds.push_back(std::make_shared<tesseract::environment::MoveLinkCommand>(joint));
-
-    tesseract::common::AllowedCollisionMatrix acm;
-    acm.addAllowedCollision(obstacle_name, attached_link, "Attached");
-    cmds.push_back(std::make_shared<tesseract::environment::ModifyAllowedCollisionsCommand>(
-        acm, tesseract::environment::ModifyAllowedCollisionsType::REMOVE));
-
-    if (!pimpl_->env_->applyCommands(cmds)) {
-        pimpl_->setLastError(PlannerStatus::INTERNAL_ERROR, "Failed to detach link in Tesseract.");
-        return false;
-    }
-
     pimpl_->attached_obstacles_.erase(it_attached);
-
-    // VAMP SIMD Collision Kernel Detachment Synchronization
-    if (pimpl_->vamp_loader_ && pimpl_->vamp_loader_->isLoaded()) {
+    if (pimpl_->vampReady()) {
         pimpl_->vamp_loader_->removeAttachedSpheres(obstacle_name);
-
-        // Re-enable as static world obstacle at its newly placed world pose
-        auto it_geom = pimpl_->obstacle_geometries_.find(obstacle_name);
         if (it_geom != pimpl_->obstacle_geometries_.end()) {
+            const auto& g = it_geom->second;
+            Eigen::Isometry3d world_tf = target_tf;
             it_geom->second.initial_pose = world_tf;
-            const auto& geom = it_geom->second;
-            if (geom.type == ObstacleShapeType::BOX) {
-                Eigen::Matrix3d R = world_tf.rotation();
-                Eigen::Vector3d half_ext(geom.dim_x * 0.5, geom.dim_y * 0.5, geom.dim_z * 0.5);
-                Eigen::Vector3d aabb_half = R.cwiseAbs() * half_ext;
-                pimpl_->vamp_loader_->addBox(obstacle_name,
-                                             world_tf.translation().x(), world_tf.translation().y(), world_tf.translation().z(),
-                                             2.0 * aabb_half.x(), 2.0 * aabb_half.y(), 2.0 * aabb_half.z());
-            } else if (geom.type == ObstacleShapeType::SPHERE) {
-                double d = 2.0 * geom.radius;
-                pimpl_->vamp_loader_->addBox(obstacle_name,
-                                             world_tf.translation().x(), world_tf.translation().y(), world_tf.translation().z(),
+            if (g.type == ObstacleShapeType::BOX) {
+                pimpl_->vamp_loader_->addBox(obstacle_name, world_tf.translation().x(), world_tf.translation().y(), world_tf.translation().z(),
+                                             g.dim_x, g.dim_y, g.dim_z);
+            } else if (g.type == ObstacleShapeType::SPHERE) {
+                double d = 2.0 * g.radius;
+                pimpl_->vamp_loader_->addBox(obstacle_name, world_tf.translation().x(), world_tf.translation().y(), world_tf.translation().z(),
                                              d, d, d);
-            } else if (geom.type == ObstacleShapeType::CYLINDER || geom.type == ObstacleShapeType::CAPSULE) {
+            } else if (g.type == ObstacleShapeType::CYLINDER || g.type == ObstacleShapeType::CAPSULE) {
                 Eigen::Matrix3d R = world_tf.rotation();
-                double total_len = (geom.type == ObstacleShapeType::CAPSULE) ? (geom.length * 0.5 + geom.radius) : (geom.length * 0.5);
-                Eigen::Vector3d local_half(geom.radius, geom.radius, total_len);
+                double total_len = (g.type == ObstacleShapeType::CAPSULE) ? (g.length * 0.5 + g.radius) : (g.length * 0.5);
+                Eigen::Vector3d local_half(g.radius, g.radius, total_len);
                 Eigen::Vector3d world_half = R.cwiseAbs() * local_half;
                 pimpl_->vamp_loader_->addBox(obstacle_name,
                                              world_tf.translation().x(), world_tf.translation().y(), world_tf.translation().z(),
                                              2.0 * world_half.x(), 2.0 * world_half.y(), 2.0 * world_half.z());
-            } else if (!geom.aabb_array.empty()) {
-                pimpl_->vamp_loader_->addBoxes(obstacle_name, geom.aabb_array);
+            } else if (!g.aabb_array.empty()) {
+                pimpl_->vamp_loader_->addBoxes(obstacle_name, g.aabb_array);
             }
         }
     }
-
     pimpl_->setLastError(PlannerStatus::SUCCESS, "");
     return true;
 }

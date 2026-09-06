@@ -233,6 +233,58 @@ int vamp_r2000ic_plan_trajectory(VampPlannerHandle handle,
     }
 }
 
+int vamp_r2000ic_parameterize(VampPlannerHandle handle,
+                              const double* waypoints_flat,
+                              int num_waypoints,
+                              double* out_positions,
+                              double* out_velocities,
+                              double* out_accelerations,
+                              double* out_time_stamps,
+                              int* out_num_points,
+                              int max_points,
+                              double max_vel_scaling,
+                              double max_acc_scaling,
+                              double sample_dt) {
+    if (!handle || !waypoints_flat || !out_positions || !out_time_stamps || !out_num_points
+        || num_waypoints < 2 || max_points <= 0) {
+        return 0;
+    }
+    auto* planner = static_cast<vamp_r2000ic::VampR2000icPlanner*>(handle);
+    try {
+        std::vector<std::vector<double>> waypoints(static_cast<size_t>(num_waypoints), std::vector<double>(6));
+        for (int i = 0; i < num_waypoints; ++i) {
+            for (int j = 0; j < 6; ++j) {
+                waypoints[static_cast<size_t>(i)][static_cast<size_t>(j)] = waypoints_flat[i * 6 + j];
+            }
+        }
+
+        vamp_r2000ic::TimedTrajectory traj;
+        if (!planner->parameterize(waypoints, traj, max_vel_scaling, max_acc_scaling, sample_dt) || traj.empty()) {
+            *out_num_points = 0;
+            return 0;
+        }
+
+        int count = std::min(static_cast<int>(traj.positions.size()), max_points);
+        for (int i = 0; i < count; ++i) {
+            for (int j = 0; j < 6; ++j) {
+                out_positions[i * 6 + j] = traj.positions[static_cast<size_t>(i)][static_cast<size_t>(j)];
+                if (out_velocities && i < static_cast<int>(traj.velocities.size())) {
+                    out_velocities[i * 6 + j] = traj.velocities[static_cast<size_t>(i)][static_cast<size_t>(j)];
+                }
+                if (out_accelerations && i < static_cast<int>(traj.accelerations.size())) {
+                    out_accelerations[i * 6 + j] = traj.accelerations[static_cast<size_t>(i)][static_cast<size_t>(j)];
+                }
+            }
+            out_time_stamps[i] = traj.time_stamps[static_cast<size_t>(i)];
+        }
+        *out_num_points = count;
+        return 1;
+    } catch (...) {
+        *out_num_points = 0;
+        return 0;
+    }
+}
+
 int vamp_r2000ic_warmup_roadmap(VampPlannerHandle handle, double warmup_time) {
     if (!handle) return 0;
     auto* planner = static_cast<vamp_r2000ic::VampR2000icPlanner*>(handle);

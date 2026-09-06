@@ -26,18 +26,17 @@ int main(int argc, char** argv) {
     std::cout << "=========================================================" << std::endl;
 
     // =========================================================================
-    // PART 1: Fanuc R-2000iC with TESSERACT Backend (Bullet/FCL Engine)
+    // PART 1: Fanuc R-2000iC with VAMP Backend
     // =========================================================================
-    std::cout << "\n>>> PART 1: Testing TESSERACT Backend (Bullet/FCL Engine) <<<" << std::endl;
+    std::cout << "\n>>> PART 1: Testing VAMP Backend (basic kinematics / scene / planning) <<<" << std::endl;
     robot_planner::RobotPlanner planner;
     
-    std::cout << "Initializing planner (TESSERACT Backend)..." << std::endl;
-    if (!planner.init(fanuc_urdf, fanuc_srdf, manip_name, base_link, tool_link, robot_planner::PlannerBackend::TESSERACT)) {
+    std::cout << "Initializing planner (VAMP Backend)..." << std::endl;
+    if (!planner.init(fanuc_urdf, fanuc_srdf, manip_name, base_link, tool_link, robot_planner::PlannerBackend::VAMP)) {
         std::cerr << "Initialization failed! Error: " << planner.getLastError() << std::endl;
         return -1;
     }
-    std::cout << "Initialization successful! Backend: " 
-              << (planner.getBackend() == robot_planner::PlannerBackend::TESSERACT ? "TESSERACT" : "VAMP") << "\n" << std::endl;
+    std::cout << "Initialization successful! Backend: VAMP\n" << std::endl;
     
     // 1. 正向运动学 (FK) 测试
     std::cout << "--- 1. FK Test ---" << std::endl;
@@ -158,8 +157,7 @@ int main(int argc, char** argv) {
     if (!fanuc_planner.init(fanuc_urdf, fanuc_srdf, manip_name, base_link, tool_link, robot_planner::PlannerBackend::VAMP)) {
         std::cerr << "Fanuc VAMP Planner initialization failed!" << std::endl;
     } else {
-        std::cout << "Fanuc Planner successfully initialized with Backend: " 
-                  << (fanuc_planner.getBackend() == robot_planner::PlannerBackend::VAMP ? "VAMP" : "TESSERACT") << std::endl;
+        std::cout << "Fanuc Planner successfully initialized with Backend: VAMP" << std::endl;
 
         std::vector<double> f_start_joints = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
         std::vector<double> f_target_joints = {0.5, 0.3, -0.4, 0.8, 0.2, 0.1};
@@ -292,33 +290,22 @@ int main(int argc, char** argv) {
     }
 
     // =========================================================================
-    // PART 3: 性能对比基准测试 (VAMP Pipeline vs Native Tesseract)
+    // PART 3: VAMP 性能基准测试
     // =========================================================================
     std::cout << "\n=========================================================" << std::endl;
-    std::cout << ">>> PART 3: Performance Timing Benchmark: VAMP vs Native Tesseract <<<" << std::endl;
+    std::cout << ">>> PART 3: Performance Timing Benchmark (VAMP) <<<" << std::endl;
     std::cout << "=========================================================" << std::endl;
 
-    robot_planner::RobotPlanner fanuc_planner_tess;
-    fanuc_planner_tess.init(fanuc_urdf, fanuc_srdf, manip_name, base_link, tool_link, robot_planner::PlannerBackend::TESSERACT);
     robot_planner::RobotPlanner& fanuc_planner_vamp = fanuc_planner;
 
     struct BenchmarkResult {
         std::string scene_name;
-        double tesseract_avg_ms = 0.0;
-        double tesseract_min_ms = 0.0;
-        double tesseract_max_ms = 0.0;
-        size_t tesseract_points = 0;
-        double tesseract_duration_s = 0.0;
-        bool tesseract_success = false;
-
         double vamp_avg_ms = 0.0;
         double vamp_min_ms = 0.0;
         double vamp_max_ms = 0.0;
         size_t vamp_points = 0;
         double vamp_duration_s = 0.0;
         bool vamp_success = false;
-
-        double speedup = 0.0;
     };
 
     std::vector<BenchmarkResult> benchmark_results;
@@ -331,30 +318,6 @@ int main(int argc, char** argv) {
 
         std::cout << "\n>>> Benchmarking Scenario: [" << scene_name << "] (" << iterations << " runs each) <<<" << std::endl;
 
-        // 1. Tesseract Backend
-        robot_planner::JointTrajectory tess_traj;
-        fanuc_planner_tess.planFreespace(f_start, f_target, tess_traj, 1.0, 1.0, 5.0, 0.02, 0.025, 20.0, "RRTConnect");
-        
-        std::vector<double> tess_times;
-        for (int i = 0; i < iterations; ++i) {
-            auto t0 = std::chrono::high_resolution_clock::now();
-            bool ok = fanuc_planner_tess.planFreespace(f_start, f_target, tess_traj, 1.0, 1.0, 5.0, 0.02, 0.025, 20.0, "RRTConnect");
-            auto t1 = std::chrono::high_resolution_clock::now();
-            if (ok) {
-                double ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
-                tess_times.push_back(ms);
-                res.tesseract_points = tess_traj.size();
-                res.tesseract_duration_s = tess_traj.empty() ? 0.0 : tess_traj.time_stamps.back();
-                res.tesseract_success = true;
-            }
-        }
-        if (!tess_times.empty()) {
-            res.tesseract_min_ms = *std::min_element(tess_times.begin(), tess_times.end());
-            res.tesseract_max_ms = *std::max_element(tess_times.begin(), tess_times.end());
-            res.tesseract_avg_ms = std::accumulate(tess_times.begin(), tess_times.end(), 0.0) / tess_times.size();
-        }
-
-        // 2. VAMP Backend
         robot_planner::JointTrajectory vamp_traj;
         fanuc_planner_vamp.planFreespace(f_start, f_target, vamp_traj, 1.0, 1.0, 5.0, 0.02, 0.025, 20.0, "RRTConnect");
         
@@ -377,10 +340,6 @@ int main(int argc, char** argv) {
             res.vamp_avg_ms = std::accumulate(vamp_times.begin(), vamp_times.end(), 0.0) / vamp_times.size();
         }
 
-        if (res.tesseract_avg_ms > 0.0 && res.vamp_avg_ms > 0.0) {
-            res.speedup = res.tesseract_avg_ms / res.vamp_avg_ms;
-        }
-
         return res;
     };
 
@@ -388,10 +347,8 @@ int main(int argc, char** argv) {
     benchmark_results.push_back(run_benchmark_case("Empty Scene", 3));
 
     // --- Scenario 2: Box Obstacle ---
-    fanuc_planner_tess.addBox("bench_box", 1.5, 0.0, 1.2, 0.4, 0.4, 0.4);
     fanuc_planner_vamp.addBox("bench_box", 1.5, 0.0, 1.2, 0.4, 0.4, 0.4);
     benchmark_results.push_back(run_benchmark_case("Box Obstacle", 3));
-    fanuc_planner_tess.removeObstacle("bench_box");
     fanuc_planner_vamp.removeObstacle("bench_box");
 
     // --- Scenario 3: Mesh Obstacle ---
@@ -402,10 +359,8 @@ int main(int argc, char** argv) {
         1.5,  0.0, 1.4
     };
     std::vector<int> bm_mesh_faces = {0, 1, 2,  0, 1, 3,  1, 2, 3,  2, 0, 3};
-    fanuc_planner_tess.addMesh("bench_mesh", bm_mesh_vertices, bm_mesh_faces, {0, 0, 0, 0, 0, 0, 1});
     fanuc_planner_vamp.addMesh("bench_mesh", bm_mesh_vertices, bm_mesh_faces, {0, 0, 0, 0, 0, 0, 1});
     benchmark_results.push_back(run_benchmark_case("Mesh Obstacle", 3));
-    fanuc_planner_tess.removeObstacle("bench_mesh");
     fanuc_planner_vamp.removeObstacle("bench_mesh");
 
     // --- Scenario 4: PointCloud Obstacle ---
@@ -419,38 +374,29 @@ int main(int argc, char** argv) {
             }
         }
     }
-    fanuc_planner_tess.addPointCloud("bench_pc", bm_pc_points, 0.05, {0, 0, 0, 0, 0, 0, 1});
     fanuc_planner_vamp.addPointCloud("bench_pc", bm_pc_points, 0.05, {0, 0, 0, 0, 0, 0, 1});
     benchmark_results.push_back(run_benchmark_case("PointCloud Wall", 3));
-    fanuc_planner_tess.removeObstacle("bench_pc");
     fanuc_planner_vamp.removeObstacle("bench_pc");
 
-    // --- 打印对比总结表格 ---
     std::cout << "\n=================================================================================================================" << std::endl;
-    std::cout << "                              RobotPlanner 全动力学性能基准对比汇总表                                            " << std::endl;
+    std::cout << "                              RobotPlanner VAMP 性能基准汇总表                                                   " << std::endl;
     std::cout << "=================================================================================================================" << std::endl;
     std::cout << std::left << std::setw(18) << "Scene Name"
-              << " | " << std::setw(20) << "Native (No VAMP)"
-              << " | " << std::setw(20) << "VAMP Pipeline"
-              << " | " << std::setw(10) << "Speedup"
-              << " | " << std::setw(14) << "Points (T/V)"
-              << " | " << std::setw(16) << "Duration (T/V)"
+              << " | " << std::setw(28) << "VAMP Pipeline"
+              << " | " << std::setw(10) << "Points"
+              << " | " << std::setw(12) << "Duration"
               << " |" << std::endl;
-    std::cout << "-------------------+----------------------+----------------------+------------+----------------+------------------|" << std::endl;
+    std::cout << "-------------------+------------------------------+------------+--------------|" << std::endl;
 
     for (const auto& r : benchmark_results) {
-        std::stringstream ss_tess, ss_vamp, ss_pts, ss_dur;
-        ss_tess << std::fixed << std::setprecision(2) << r.tesseract_avg_ms << " ms (" << r.tesseract_min_ms << "~" << r.tesseract_max_ms << ")";
+        std::stringstream ss_vamp, ss_dur;
         ss_vamp << std::fixed << std::setprecision(2) << r.vamp_avg_ms << " ms (" << r.vamp_min_ms << "~" << r.vamp_max_ms << ")";
-        ss_pts << r.tesseract_points << " / " << r.vamp_points;
-        ss_dur << std::fixed << std::setprecision(2) << r.tesseract_duration_s << "s / " << r.vamp_duration_s << "s";
+        ss_dur << std::fixed << std::setprecision(2) << r.vamp_duration_s << "s";
 
         std::cout << std::left << std::setw(18) << r.scene_name
-                  << " | " << std::setw(20) << ss_tess.str()
-                  << " | " << std::setw(20) << ss_vamp.str()
-                  << " | " << std::fixed << std::setprecision(2) << std::setw(8) << r.speedup << "x"
-                  << " | " << std::setw(14) << ss_pts.str()
-                  << " | " << std::setw(16) << ss_dur.str()
+                  << " | " << std::setw(28) << ss_vamp.str()
+                  << " | " << std::setw(10) << r.vamp_points
+                  << " | " << std::setw(12) << ss_dur.str()
                   << " |" << std::endl;
     }
     std::cout << "=================================================================================================================\n" << std::endl;
@@ -495,7 +441,7 @@ int main(int argc, char** argv) {
                   << (w_work / std::max(1e-6, w_zero)) << "x)." << std::endl;
     }
 
-    // 4.2 几何基元扩充 (Sphere / Cylinder / Capsule) 与双后端同步
+    // 4.2 几何基元扩充 (Sphere / Cylinder / Capsule)
     std::cout << "\n[4.2] Geometric Primitives (Sphere / Cylinder / Capsule)..." << std::endl;
     fanuc_planner.clearObstacles();
     fanuc_planner.addSphere("test_sphere", 1.5, 0.0, 1.2, 0.15);
@@ -594,12 +540,12 @@ int main(int argc, char** argv) {
     std::cout << ">>> PART 5: Fanuc R-2000iC/165F 综合工业碰撞世界 (Workcell Collision World) & 100% 全接口极限测试 <<<" << std::endl;
     std::cout << "=================================================================================================================" << std::endl;
 
-    // 5.1 规划器初始化与后端切换全面测试 (AUTO / VAMP / TESSERACT / 错误处理)
+    // 5.1 规划器初始化与错误处理
     std::cout << "\n[5.1] Testing Initialization & Backend Variants..." << std::endl;
     robot_planner::RobotPlanner auto_planner;
-    bool auto_ok = auto_planner.init(fanuc_urdf, fanuc_srdf, manip_name, base_link, tool_link, robot_planner::PlannerBackend::AUTO);
-    std::cout << "  - Init with PlannerBackend::AUTO: " << (auto_ok ? "SUCCESS" : "FAILED") 
-              << " (Active Backend: " << (auto_planner.getBackend() == robot_planner::PlannerBackend::VAMP ? "VAMP" : "TESSERACT") << ")" << std::endl;
+    bool auto_ok = auto_planner.init(fanuc_urdf, fanuc_srdf, manip_name, base_link, tool_link);
+    std::cout << "  - Init with default backend: " << (auto_ok ? "SUCCESS" : "FAILED")
+              << " (Active Backend: VAMP)" << std::endl;
 
     robot_planner::RobotPlanner bad_planner;
     bool bad_init = bad_planner.init("invalid_urdf_path.urdf", fanuc_srdf, manip_name, base_link, tool_link);
@@ -607,7 +553,7 @@ int main(int argc, char** argv) {
               << " | Status: " << static_cast<int>(bad_planner.getLastErrorStatus()) 
               << " | Error: " << bad_planner.getLastError() << std::endl;
 
-    // 5.2 在真实工业碰撞世界中，双后端 (TESSERACT vs VAMP) 100% 同场全接口对比测试
+    // 5.2 在真实工业碰撞世界中，VAMP 全接口测试
     struct WorkcellMetrics {
         std::string backend_name;
         double col_check_us = 0.0;
@@ -627,12 +573,11 @@ int main(int argc, char** argv) {
     std::vector<WorkcellMetrics> workcell_metrics_list;
 
     std::vector<robot_planner::PlannerBackend> evaluated_backends = {
-        robot_planner::PlannerBackend::TESSERACT,
         robot_planner::PlannerBackend::VAMP
     };
 
     for (auto backend_choice : evaluated_backends) {
-        std::string bname = (backend_choice == robot_planner::PlannerBackend::VAMP) ? "VAMP" : "TESSERACT";
+        std::string bname = "VAMP";
         WorkcellMetrics wm;
         wm.backend_name = bname;
 
@@ -834,9 +779,9 @@ int main(int argc, char** argv) {
         workcell_metrics_list.push_back(wm);
     }
 
-    // 5.3 工业碰撞世界：双后端 (TESSERACT vs VAMP) 性能与合规性横评汇总
+    // 5.3 工业碰撞世界：VAMP 性能与合规性汇总
     std::cout << "\n=================================================================================================================" << std::endl;
-    std::cout << "                 Fanuc 7 图元真实工业碰撞世界：TESSERACT vs VAMP 双后端横评对比表                                  " << std::endl;
+    std::cout << "                 Fanuc 7 图元真实工业碰撞世界：VAMP 性能与合规性汇总                                               " << std::endl;
     std::cout << "=================================================================================================================" << std::endl;
     std::cout << std::left << std::setw(14) << "Backend"
               << " | " << std::setw(16) << "ColCheck (us)"
@@ -857,26 +802,6 @@ int main(int argc, char** argv) {
                   << " |" << std::endl;
     }
 
-    if (workcell_metrics_list.size() == 2) {
-        double col_speedup = workcell_metrics_list[0].col_check_us / std::max(1e-6, workcell_metrics_list[1].col_check_us);
-        double free_speedup = workcell_metrics_list[0].freespace_ms / std::max(1e-6, workcell_metrics_list[1].freespace_ms);
-        double lin_speedup = workcell_metrics_list[0].linear_ms / std::max(1e-6, workcell_metrics_list[1].linear_ms);
-        double circ_speedup = workcell_metrics_list[0].circular_ms / std::max(1e-6, workcell_metrics_list[1].circular_ms);
-        std::stringstream ss_col, ss_free, ss_lin, ss_circ;
-        ss_col << std::fixed << std::setprecision(2) << col_speedup << "x";
-        ss_free << std::fixed << std::setprecision(2) << free_speedup << "x";
-        ss_lin << std::fixed << std::setprecision(2) << lin_speedup << "x";
-        ss_circ << std::fixed << std::setprecision(2) << circ_speedup << "x";
-
-        std::cout << "---------------+------------------+--------------------+--------------------+--------------------+------------------|" << std::endl;
-        std::cout << std::left << std::setw(14) << "VAMP Speedup"
-                  << " | " << std::setw(16) << ss_col.str()
-                  << " | " << std::setw(18) << ss_free.str()
-                  << " | " << std::setw(18) << ss_lin.str()
-                  << " | " << std::setw(18) << ss_circ.str()
-                  << " | " << std::setw(16) << "BOTH PASS!"
-                  << " |" << std::endl;
-    }
     std::cout << "=================================================================================================================\n" << std::endl;
 
     // =========================================================================

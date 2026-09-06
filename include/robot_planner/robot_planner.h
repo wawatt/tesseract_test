@@ -10,9 +10,7 @@ namespace robot_planner {
  * @brief 规划器底层后端类型
  */
 enum class PlannerBackend {
-    TESSERACT = 0,  // 原生 Tesseract + Bullet/FCL 引擎
-    VAMP = 1,       // 纯 VAMP AVX2 SIMD 硬件加速 (所有障碍物自动转 Octree/AABB)
-    AUTO = 2        // 自动探测 (若是 r2000ic_165f 且动态库存在则使用 VAMP，否则使用 Tesseract)
+    VAMP = 1  // VAMP AVX2 SIMD 硬件加速（当前唯一后端）
 };
 
 /**
@@ -81,7 +79,7 @@ public:
      * @param manipulator_name 规划组名称 (例如: "manipulator")
      * @param base_link 基座连杆名称 (例如: "base_link")
      * @param tool_link 工具连杆名称 (例如: "tool0")
-     * @param backend 规划后端类型 (TESSERACT / VAMP / AUTO，默认 AUTO)
+     * @param backend 规划后端类型（仅 VAMP）
      * @param custom_plugin_path 自定义加速动态库路径
      * @return 成功返回 true
      */
@@ -89,7 +87,7 @@ public:
               const std::string& manipulator_name, 
               const std::string& base_link, 
               const std::string& tool_link,
-              PlannerBackend backend = PlannerBackend::AUTO,
+              PlannerBackend backend = PlannerBackend::VAMP,
               const std::string& custom_plugin_path = "");
 
     /**
@@ -350,17 +348,6 @@ public:
     // ---------------------------------------------------------
 
     /**
-     * @brief 自由空间点到点避障规划 (全动力学轨迹输出)
-     * @param start_joints 起始关节角度 [rad]
-     * @param target_joints 目标关节角度 [rad]
-     * @param trajectory_out 输出完整时间参数化轨迹 (含位置、速度、加速度、时间戳)
-     * @param max_velocity_scaling 最大速度缩放比例 (0.01 ~ 1.0，默认 1.0)
-     * @param max_acceleration_scaling 最大加速度缩放比例 (0.01 ~ 1.0，默认 1.0)
-     * @param planning_time 全局寻路最大超时时间 (秒，默认 10.0)
-     * @param range 采样步长 (弧度，默认 0.01)
-     * @param safety_margin 避障安全裕度 (米，默认 0.025)
-     * @param collision_coeff 碰撞代价系数 (默认 20.0)
-    /**
      * @brief 预先构建/预热 PRM 稠密路标图 (cuRobo PRMGraphPlanner 风格)
      * @details 在静态工位启动时预先对工作空间进行采样构图，后续在线查询只需毫秒级图搜索 + TrajOpt，替代耗时数秒的重复树搜索
      * @param warmup_time 预热采样时长 (秒，默认 0.3)
@@ -422,7 +409,7 @@ public:
                            size_t max_seeds = 8);
 
     /**
-     * @brief 笛卡尔直线规划 (线性插补，带奇异点检测与动力学时间参数化)
+     * @brief 笛卡尔直线规划 (线性插补，带奇异点检测与 TOPP-RA 时间最优参数化)
      * @param start_joints 起始关节角度 [rad]
      * @param target_pose 目标位姿 [x, y, z, qx, qy, qz, qw]
      * @param trajectory_out 输出完整时间参数化轨迹
@@ -443,7 +430,7 @@ public:
                     double collision_coeff = 20.0);
 
     /**
-     * @brief 笛卡尔圆弧规划 (圆弧三点插补，带共线/奇异点检测与动力学时间参数化)
+     * @brief 笛卡尔圆弧规划 (圆弧三点插补，带共线/奇异点检测与 TOPP-RA 时间最优参数化)
      * @param start_joints 起始关节角度 [rad]
      * @param aux_pose 圆弧中间辅助点位姿 [x, y, z, qx, qy, qz, qw]
      * @param target_pose 目标终点位姿 [x, y, z, qx, qy, qz, qw]
