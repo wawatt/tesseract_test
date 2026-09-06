@@ -4,6 +4,16 @@
 #include <string>
 #include <memory>
 
+#if defined(_WIN32)
+#  if defined(ROBOT_PLANNER_EXPORTS)
+#    define ROBOT_PLANNER_API __declspec(dllexport)
+#  else
+#    define ROBOT_PLANNER_API __declspec(dllimport)
+#  endif
+#else
+#  define ROBOT_PLANNER_API __attribute__((visibility("default")))
+#endif
+
 namespace robot_planner {
 
 /**
@@ -67,10 +77,12 @@ struct ContactInfo {
     std::vector<double> normal;     // 接触法向量 [nx, ny, nz] (指向物体2)
 };
 
-class RobotPlanner {
+class ROBOT_PLANNER_API RobotPlanner {
 public:
     RobotPlanner();
     ~RobotPlanner();
+    RobotPlanner(const RobotPlanner&) = delete;
+    RobotPlanner& operator=(const RobotPlanner&) = delete;
 
     /**
      * @brief 初始化规划器

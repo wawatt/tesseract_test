@@ -1,6 +1,7 @@
 build/
 .vscode/
 workspace/
+install/
 *.ps1
 *.dot
 scratch/

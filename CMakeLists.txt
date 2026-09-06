@@ -25,6 +25,10 @@ endif()
 # 添加以下行以限制只支持Debug和Release配置
 set(CMAKE_CONFIGURATION_TYPES "Debug;Release" CACHE STRING "Configs" FORCE)
 
+if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+  set(CMAKE_INSTALL_PREFIX "${CMAKE_SOURCE_DIR}/install" CACHE PATH "Install prefix" FORCE)
+endif()
+
 message(STATUS "############################# Build type: ${CMAKE_BUILD_TYPE}")
 message(STATUS "Configuration types: ${CMAKE_CONFIGURATION_TYPES}")
 
@@ -43,26 +47,55 @@ endif()
 # find_package(RVSBase REQUIRED)
 # find_package(ros_industrial_cmake_boilerplate REQUIRED)
 
-# OCR Tesseract also installs share/tesseract; load robotics first so
-# tesseract_DIR points at tesseract-robotics (imported targets stay tesseract::*).
-find_package(tesseract-robotics CONFIG REQUIRED)
+# tesseract-robotics lives in a custom prefix. vcpkg also ships OCR Tesseract
+# (share/tesseract) and a static-only osqp (no osqp::osqp); both must lose.
+set(TESSERACT_ROBOTICS_PREFIX "D:/build/tesseract-0.35.0/install")
+if(EXISTS "${TESSERACT_ROBOTICS_PREFIX}")
+  list(PREPEND CMAKE_PREFIX_PATH "${TESSERACT_ROBOTICS_PREFIX}")
+  set(osqp_DIR "${TESSERACT_ROBOTICS_PREFIX}/lib/cmake/osqp" CACHE PATH "osqp from tesseract-robotics" FORCE)
+  set(OsqpEigen_DIR "${TESSERACT_ROBOTICS_PREFIX}/lib/cmake/OsqpEigen" CACHE PATH "OsqpEigen from tesseract-robotics" FORCE)
+  set(tesseract_DIR "${TESSERACT_ROBOTICS_PREFIX}/lib/cmake/tesseract" CACHE PATH "tesseract-robotics CMake package directory" FORCE)
+  set(tesseract_planning_DIR "${TESSERACT_ROBOTICS_PREFIX}/lib/cmake/tesseract_planning" CACHE PATH "tesseract_planning CMake package directory" FORCE)
+endif()
+
+find_package(osqp CONFIG REQUIRED)
+find_package(OsqpEigen CONFIG REQUIRED)
+if(NOT TARGET osqp::osqp)
+  message(FATAL_ERROR "osqp::osqp not found. Point osqp_DIR at tesseract-robotics (shared osqp), not vcpkg's static-only osqp.")
+endif()
+
+find_package(tesseract-robotics CONFIG QUIET)
 find_package(tesseract REQUIRED COMPONENTS common geometry scene_graph state_solver collision srdf urdf kinematics environment visualization support)
 find_package(Boost REQUIRED COMPONENTS program_options filesystem serialization system)
 find_package(tesseract_planning REQUIRED)
 find_package(trajopt_sqp REQUIRED)
 find_package(trajopt_ifopt REQUIRED)
-find_package(PCL REQUIRED COMPONENTS common)
+find_package(PCL QUIET COMPONENTS common)
 find_package(GTest CONFIG REQUIRED)
 
 set(TESSERACT_VCPKG_PREFIX "${VCPKG_INSTALLED_DIR}/x64-windows")
 set(TESSERACT_TEST_SHARE_DIR "${TESSERACT_VCPKG_PREFIX}/share")
 
-add_library(robot_planner STATIC
+add_library(robot_planner SHARED
   src/robot_planner/robot_planner_init.cpp
   src/robot_planner/robot_planner_kinematics.cpp
   src/robot_planner/robot_planner_scene.cpp
   src/robot_planner/robot_planner_collision.cpp
   src/robot_planner/robot_planner_motion.cpp
+)
+add_library(robot_planner::robot_planner ALIAS robot_planner)
+target_compile_definitions(robot_planner PRIVATE ROBOT_PLANNER_EXPORTS)
+set_target_properties(robot_planner PROPERTIES
+  VERSION ${PROJECT_VERSION}
+  SOVERSION 0
+  OUTPUT_NAME robot_planner
+  EXPORT_NAME robot_planner
+  CXX_VISIBILITY_PRESET hidden
+  VISIBILITY_INLINES_HIDDEN ON
+  RUNTIME_OUTPUT_DIRECTORY_RELEASE "${PROJECT_SOURCE_DIR}/workspace/Release"
+  RUNTIME_OUTPUT_DIRECTORY_DEBUG "${PROJECT_SOURCE_DIR}/workspace/Debug"
+  ARCHIVE_OUTPUT_DIRECTORY_RELEASE "${PROJECT_SOURCE_DIR}/workspace/Release"
+  ARCHIVE_OUTPUT_DIRECTORY_DEBUG "${PROJECT_SOURCE_DIR}/workspace/Debug"
 )
 
 add_library(${PROJECT_NAME} STATIC
@@ -81,22 +114,23 @@ add_library(${PROJECT_NAME} STATIC
 
 target_link_libraries(
   robot_planner
-  PUBLIC tesseract::environment
-         tesseract::motion_planners
-         tesseract::motion_planners_ompl
-         tesseract::motion_planners_trajopt
-         tesseract::motion_planners_trajopt_ifopt
-         trajopt::trajopt_sqp
-         trajopt::trajopt_ifopt
-         tesseract::task_composer
-         tesseract::task_composer_planning_nodes
-         console_bridge::console_bridge
-         tesseract::collision
-  PRIVATE ${PCL_LIBRARIES})
+  PRIVATE tesseract::environment
+          tesseract::motion_planners
+          tesseract::motion_planners_ompl
+          tesseract::motion_planners_trajopt
+          tesseract::motion_planners_trajopt_ifopt
+          trajopt::trajopt_sqp
+          trajopt::trajopt_ifopt
+          tesseract::task_composer
+          tesseract::task_composer_planning_nodes
+          console_bridge::console_bridge
+          tesseract::collision)
 
-target_include_directories(robot_planner PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
-                                                  "$<INSTALL_INTERFACE:include>"
-                                         PRIVATE "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/robot_planner>")
+target_include_directories(robot_planner PUBLIC
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
+    "$<INSTALL_INTERFACE:include>"
+  PRIVATE
+    "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/robot_planner>")
 
 target_link_libraries(
   ${PROJECT_NAME}
@@ -109,12 +143,14 @@ target_link_libraries(
          trajopt::trajopt_ifopt
          tesseract::task_composer
          tesseract::task_composer_planning_nodes
-         console_bridge::console_bridge
-  PRIVATE ${PCL_LIBRARIES})
+         console_bridge::console_bridge)
 
 target_include_directories(${PROJECT_NAME} PUBLIC "$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>"
-                                                  "$<INSTALL_INTERFACE:include>"
-                                           PRIVATE ${PCL_INCLUDE_DIRS})
+                                                  "$<INSTALL_INTERFACE:include>")
+if(PCL_FOUND)
+  target_link_libraries(${PROJECT_NAME} PRIVATE ${PCL_LIBRARIES})
+  target_include_directories(${PROJECT_NAME} PRIVATE ${PCL_INCLUDE_DIRS})
+endif()
 target_compile_options(${PROJECT_NAME} PUBLIC ${TESSERACT_COMPILE_OPTIONS})
 
 macro(add_example example_name example_file)
@@ -165,6 +201,51 @@ set_tests_properties(test_robot_planner PROPERTIES ENVIRONMENT "${TESSERACT_TEST
 
 # Fanuc R-2000iC/165F VAMP SIMD acceleration module
 add_subdirectory(vamp_r2000ic)
+
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
+
+install(TARGETS robot_planner
+  EXPORT robot_plannerTargets
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+  ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
+)
+
+install(FILES include/robot_planner/robot_planner.h
+  DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/robot_planner
+)
+
+# Runtime plugin loaded by robot_planner via LoadLibrary (DLL only).
+install(TARGETS vamp_r2000ic
+  RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+  LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+)
+
+write_basic_package_version_file(
+  "${CMAKE_CURRENT_BINARY_DIR}/robot_plannerConfigVersion.cmake"
+  VERSION ${PROJECT_VERSION}
+  COMPATIBILITY SameMajorVersion
+)
+
+configure_package_config_file(
+  "${CMAKE_CURRENT_SOURCE_DIR}/cmake/robot_plannerConfig.cmake.in"
+  "${CMAKE_CURRENT_BINARY_DIR}/robot_plannerConfig.cmake"
+  INSTALL_DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/robot_planner"
+  PATH_VARS CMAKE_INSTALL_INCLUDEDIR CMAKE_INSTALL_BINDIR CMAKE_INSTALL_LIBDIR
+)
+
+install(FILES
+  "${CMAKE_CURRENT_BINARY_DIR}/robot_plannerConfig.cmake"
+  "${CMAKE_CURRENT_BINARY_DIR}/robot_plannerConfigVersion.cmake"
+  DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/robot_planner"
+)
+
+install(EXPORT robot_plannerTargets
+  FILE robot_plannerTargets.cmake
+  NAMESPACE robot_planner::
+  DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/robot_planner"
+)
 
 # if (MSVC)
 #   # 复制tesseract::tesseract_common 所在文件夹下的所有dll

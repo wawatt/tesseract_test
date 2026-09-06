@@ -59,6 +59,17 @@ public:
         return handle_ != nullptr;
     }
 
+#ifdef _WIN32
+    static HMODULE currentModule() {
+        HMODULE module = nullptr;
+        GetModuleHandleExA(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                               GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                           reinterpret_cast<LPCSTR>(&VampDynamicLoader::currentModule),
+                           &module);
+        return module;
+    }
+#endif
+
     /**
      * @brief Attempts to dynamically locate and load robot-specific VAMP accelerator DLL.
      * @param explicit_path User provided DLL path
@@ -84,20 +95,26 @@ public:
         dll_names.push_back("vamp_r2000ic.dll");
 
 #ifdef _WIN32
-        // Get directory of current running executable
-        char exe_path[MAX_PATH] = {0};
-        std::string exe_dir = "";
-        if (GetModuleFileNameA(NULL, exe_path, MAX_PATH)) {
-            std::string dir(exe_path);
+        auto dir_of_module = [](HMODULE module) -> std::string {
+            if (!module) return "";
+            char path[MAX_PATH] = {0};
+            if (!GetModuleFileNameA(module, path, MAX_PATH)) return "";
+            std::string dir(path);
             size_t pos = dir.find_last_of("\\/");
-            if (pos != std::string::npos) {
-                exe_dir = dir.substr(0, pos + 1);
-            }
-        }
+            if (pos == std::string::npos) return "";
+            return dir.substr(0, pos + 1);
+        };
+
+        std::vector<std::string> search_dirs;
+        search_dirs.push_back(dir_of_module(GetModuleHandleA("robot_planner.dll")));
+        search_dirs.push_back(dir_of_module(currentModule()));
+        search_dirs.push_back(dir_of_module(GetModuleHandleA(nullptr)));
 
         for (const auto& dll : dll_names) {
-            if (!exe_dir.empty()) {
-                candidate_paths.push_back(exe_dir + dll);
+            for (const auto& dir : search_dirs) {
+                if (!dir.empty()) {
+                    candidate_paths.push_back(dir + dll);
+                }
             }
             candidate_paths.push_back(dll);
             candidate_paths.push_back("workspace/Release/" + dll);

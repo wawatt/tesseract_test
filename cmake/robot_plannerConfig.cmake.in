@@ -1,0 +1,13 @@
+@PACKAGE_INIT@
+
+if(NOT TARGET robot_planner::robot_planner)
+  include("${CMAKE_CURRENT_LIST_DIR}/robot_plannerTargets.cmake")
+endif()
+
+set(robot_planner_LIBRARIES robot_planner::robot_planner)
+set_and_check(robot_planner_INCLUDE_DIR "@PACKAGE_CMAKE_INSTALL_INCLUDEDIR@")
+set(robot_planner_INCLUDE_DIRS "${robot_planner_INCLUDE_DIR}")
+set_and_check(robot_planner_BIN_DIR "@PACKAGE_CMAKE_INSTALL_BINDIR@")
+set_and_check(robot_planner_LIB_DIR "@PACKAGE_CMAKE_INSTALL_LIBDIR@")
+
+check_required_components(robot_planner)
