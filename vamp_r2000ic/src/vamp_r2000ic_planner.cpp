@@ -8,8 +8,56 @@
 #include <ompl/geometric/planners/prm/PRM.h>
 #include <ompl/geometric/PathSimplifier.h>
 #include <ompl/base/PlannerTerminationCondition.h>
+#include <algorithm>
+#include <cmath>
 
 namespace vamp_r2000ic {
+
+namespace {
+
+void interpolateCspace(const std::vector<double>& a,
+                       const std::vector<double>& b,
+                       std::vector<std::vector<double>>& out,
+                       double resolution) {
+    double max_dist = 0.0;
+    for (int i = 0; i < 6; ++i) {
+        max_dist = std::max(max_dist, std::abs(b[i] - a[i]));
+    }
+    const double res = std::max(1e-6, resolution);
+    const int steps = std::max(8, static_cast<int>(std::ceil(max_dist / res)));
+    out.clear();
+    out.reserve(static_cast<size_t>(steps) + 1);
+    for (int s = 0; s <= steps; ++s) {
+        const double alpha = static_cast<double>(s) / steps;
+        std::vector<double> q(6);
+        for (int i = 0; i < 6; ++i) {
+            q[i] = (1.0 - alpha) * a[i] + alpha * b[i];
+        }
+        out.push_back(std::move(q));
+    }
+}
+
+bool extractGeometricPath(ompl::geometric::PathGeometric& geo_path,
+                          std::vector<std::vector<double>>& trajectory_out) {
+    ompl::geometric::PathSimplifier simplifier(geo_path.getSpaceInformation());
+    simplifier.simplifyMax(geo_path);
+    simplifier.smoothBSpline(geo_path, 3);
+    // Keep a modest number of vertices; B-spline resamples by arc length later.
+    const unsigned int n = std::max(8u, std::min(32u, static_cast<unsigned int>(geo_path.getStateCount())));
+    geo_path.interpolate(n);
+
+    trajectory_out.clear();
+    trajectory_out.reserve(geo_path.getStateCount());
+    for (size_t i = 0; i < geo_path.getStateCount(); ++i) {
+        const auto* rstate = geo_path.getState(i)->as<ompl::base::RealVectorStateSpace::StateType>();
+        std::vector<double> wp(6);
+        for (int j = 0; j < 6; ++j) wp[j] = rstate->values[j];
+        trajectory_out.push_back(std::move(wp));
+    }
+    return !trajectory_out.empty();
+}
+
+} // namespace
 
 struct VampR2000icPlanner::Impl {
     CollisionChecker checker_;
@@ -75,6 +123,10 @@ bool VampR2000icPlanner::loadSRDF(const std::string& srdf_path) {
         pimpl_->persistent_prm_->clearQuery();
     }
     return res;
+}
+
+bool VampR2000icPlanner::isCollisionAllowed(const std::string& link1, const std::string& link2) const {
+    return pimpl_->checker_.isCollisionAllowed(link1, link2);
 }
 
 bool VampR2000icPlanner::setAllowedCollision(const std::string& link1, const std::string& link2, bool allowed) {
@@ -149,6 +201,14 @@ bool VampR2000icPlanner::checkCollision(const std::vector<double>& joints, doubl
     return pimpl_->checker_.checkCollision(joints.data(), static_cast<float>(safety_margin));
 }
 
+bool VampR2000icPlanner::checkCollisionDetailed(const std::vector<double>& joints,
+                                                std::vector<ContactHit>& contacts_out,
+                                                double contact_distance) {
+    contacts_out.clear();
+    if (joints.size() < 6) return false;
+    return pimpl_->checker_.collectContacts(joints.data(), contacts_out, contact_distance);
+}
+
 CollisionChecker& VampR2000icPlanner::getCollisionChecker() {
     return pimpl_->checker_;
 }
@@ -172,6 +232,13 @@ bool VampR2000icPlanner::planFreespace(const std::vector<double>& start_joints,
     if (checkCollision(start_joints, safety_margin) || checkCollision(target_joints, safety_margin)) {
         std::cerr << "[VampPlanner] Start or Target configuration is in collision!" << std::endl;
         return false;
+    }
+
+    // Easy-case PTP: C-space straight line is already collision-free (skip graph search)
+    if (pimpl_->checker_.isMotionValid(start_joints.data(), target_joints.data(),
+                                       static_cast<float>(safety_margin), range)) {
+        interpolateCspace(start_joints, target_joints, trajectory_out, range);
+        return true;
     }
 
     // Fast path: cuRobo-style PRMGraphPlanner with persistent roadmap & warmup
@@ -199,20 +266,7 @@ bool VampR2000icPlanner::planFreespace(const std::vector<double>& start_joints,
             auto path_ptr = pimpl_->pdef_->getSolutionPath();
             auto* geo_path = dynamic_cast<ompl::geometric::PathGeometric*>(path_ptr.get());
             if (geo_path) {
-                ompl::geometric::PathSimplifier simplifier(pimpl_->si_);
-                simplifier.simplifyMax(*geo_path);
-                simplifier.smoothBSpline(*geo_path, 3);
-                geo_path->interpolate();
-
-                trajectory_out.clear();
-                trajectory_out.reserve(geo_path->getStateCount());
-                for (size_t i = 0; i < geo_path->getStateCount(); ++i) {
-                    const auto* rstate = geo_path->getState(i)->as<ompl::base::RealVectorStateSpace::StateType>();
-                    std::vector<double> wp(6);
-                    for (int j = 0; j < 6; ++j) wp[j] = rstate->values[j];
-                    trajectory_out.push_back(wp);
-                }
-                return true;
+                return extractGeometricPath(*geo_path, trajectory_out);
             }
         }
         return false;
@@ -245,21 +299,7 @@ bool VampR2000icPlanner::planFreespace(const std::vector<double>& start_joints,
 
     ompl::base::PlannerStatus solved = ss.solve(planning_time);
     if (solved && ss.haveExactSolutionPath()) {
-        auto& path = ss.getSolutionPath();
-        ompl::geometric::PathSimplifier simplifier(ss.getSpaceInformation());
-        simplifier.simplifyMax(path);
-        simplifier.smoothBSpline(path, 3);
-        path.interpolate();
-
-        trajectory_out.clear();
-        trajectory_out.reserve(path.getStateCount());
-        for (size_t i = 0; i < path.getStateCount(); ++i) {
-            const auto* rstate = path.getState(i)->as<ompl::base::RealVectorStateSpace::StateType>();
-            std::vector<double> wp(6);
-            for (int j = 0; j < 6; ++j) wp[j] = rstate->values[j];
-            trajectory_out.push_back(wp);
-        }
-        return true;
+        return extractGeometricPath(ss.getSolutionPath(), trajectory_out);
     }
 
     return false;
@@ -286,28 +326,50 @@ bool VampR2000icPlanner::planTrajectory(const std::vector<double>& start_joints,
         return false;
     }
 
-    // Step 2: B-Spline + L-BFGS optimization (cuRobo style)
+    // Step 2: B-Spline + L-BFGS (shorten / smooth in C-space, keep collision cost)
     int num_cp = 12;
     int num_samples = 40;
     VampBSplineOptimizer optimizer(pimpl_->checker_, num_cp, num_samples);
     optimizer.setWeights(1.0, 100.0, 200.0, safety_margin);
+    if (pimpl_->space_) {
+        const auto& bounds = pimpl_->space_->getBounds();
+        std::vector<double> jmin(6), jmax(6);
+        for (int i = 0; i < 6; ++i) {
+            jmin[i] = bounds.low[i];
+            jmax[i] = bounds.high[i];
+        }
+        optimizer.setJointLimits(jmin, jmax);
+    }
 
     Eigen::MatrixXd control_points;
     optimizer.getBSpline().initFromWaypoints(seed_waypoints, start_joints, target_joints, control_points);
     optimizer.optimize(control_points, 25);
 
-    // Evaluate dense samples from optimized B-Spline
     Eigen::MatrixXd optimized_samples;
     optimizer.getBSpline().evaluate(control_points, optimized_samples);
 
     int rows = static_cast<int>(optimized_samples.rows());
     std::vector<std::vector<double>> opt_waypoints(rows, std::vector<double>(6));
+    bool spline_collides = false;
     for (int i = 0; i < rows; ++i) {
         for (int d = 0; d < 6; ++d) {
             opt_waypoints[i][d] = optimized_samples(i, d);
         }
+        if (checkCollision(opt_waypoints[i], safety_margin)) {
+            spline_collides = true;
+            break;
+        }
     }
 
+    // If L-BFGS pulled the path into collision, keep the geometric PRM/RRT path
+    if (spline_collides || opt_waypoints.size() < 3) {
+        opt_waypoints = seed_waypoints;
+        if (opt_waypoints.size() < 3) {
+            interpolateCspace(start_joints, target_joints, opt_waypoints, range);
+        }
+    }
+
+    // Step 3: TOPP-RA time-optimal parameterization of the fixed geometric path
     return parameterize(opt_waypoints, trajectory_out, max_velocity_scaling, max_acceleration_scaling);
 }
 

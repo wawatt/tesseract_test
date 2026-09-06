@@ -286,34 +286,35 @@ bool RobotPlanner::addPointCloud(const std::string& name,
 }
 
 bool RobotPlanner::setAllowedCollision(const std::string& link1, const std::string& link2, bool allowed) {
-    if (!pimpl_->env_) {
-        pimpl_->setLastError(PlannerStatus::NOT_INITIALIZED, "Environment not initialized.");
+    if (!pimpl_->vampReady()) {
+        pimpl_->setLastError(PlannerStatus::NOT_INITIALIZED, "VAMP backend is not loaded.");
         return false;
     }
-    tesseract::common::AllowedCollisionMatrix acm;
-    auto cur_acm = pimpl_->env_->getAllowedCollisionMatrix();
-    if (cur_acm) {
-        acm = *cur_acm;
+    bool ok = pimpl_->vamp_loader_->setAllowedCollision(link1, link2, allowed);
+    if (pimpl_->env_) {
+        tesseract::common::AllowedCollisionMatrix acm;
+        auto cur_acm = pimpl_->env_->getAllowedCollisionMatrix();
+        if (cur_acm) {
+            acm = *cur_acm;
+        }
+        if (allowed) {
+            acm.addAllowedCollision(link1, link2, "UserAllowed");
+        } else {
+            acm.removeAllowedCollision(link1, link2);
+        }
+        auto cmd = std::make_shared<tesseract::environment::ModifyAllowedCollisionsCommand>(
+            acm, tesseract::environment::ModifyAllowedCollisionsType::REPLACE);
+        pimpl_->env_->applyCommand(cmd);
     }
-    if (allowed) {
-        acm.addAllowedCollision(link1, link2, "UserAllowed");
-    } else {
-        acm.removeAllowedCollision(link1, link2);
-    }
-    auto cmd = std::make_shared<tesseract::environment::ModifyAllowedCollisionsCommand>(
-        acm, tesseract::environment::ModifyAllowedCollisionsType::REPLACE);
-    bool ok = pimpl_->env_->applyCommand(cmd);
-
-    if (pimpl_->vamp_loader_ && pimpl_->vamp_loader_->isLoaded()) {
-        pimpl_->vamp_loader_->setAllowedCollision(link1, link2, allowed);
-    }
-
     pimpl_->setLastError(ok ? PlannerStatus::SUCCESS : PlannerStatus::INTERNAL_ERROR,
-                         ok ? "" : "Failed to apply ModifyAllowedCollisionsCommand.");
+                         ok ? "" : "Failed to update VAMP allowed-collision whitelist.");
     return ok;
 }
 
 bool RobotPlanner::isCollisionAllowed(const std::string& link1, const std::string& link2) const {
+    if (pimpl_->vampReady()) {
+        return pimpl_->vamp_loader_->isCollisionAllowed(link1, link2);
+    }
     if (!pimpl_->env_) return false;
     auto acm = pimpl_->env_->getAllowedCollisionMatrix();
     if (!acm) return false;

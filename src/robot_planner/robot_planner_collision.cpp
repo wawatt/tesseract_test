@@ -6,6 +6,18 @@ bool RobotPlanner::checkCollisionDetailed(const std::vector<double>& joint_angle
                                           std::vector<ContactInfo>& contacts_out, 
                                           double contact_distance) {
     contacts_out.clear();
+    pimpl_->last_known_joints_ = joint_angles;
+    if (pimpl_->vampReady() && joint_angles.size() == 6) {
+        bool hit = pimpl_->vamp_loader_->checkCollisionDetailed(joint_angles, contacts_out, contact_distance);
+        if (hit && !contacts_out.empty()) {
+            pimpl_->setLastError(PlannerStatus::COLLISION_DETECTED,
+                "Contact detected between '" + contacts_out[0].link_name1 + "' and '" + contacts_out[0].link_name2 +
+                "' (distance: " + std::to_string(contacts_out[0].distance) + "m)");
+            return true;
+        }
+        pimpl_->setLastError(PlannerStatus::SUCCESS, "");
+        return false;
+    }
     if (!pimpl_->env_) {
         pimpl_->setLastError(PlannerStatus::NOT_INITIALIZED, "Environment not initialized.");
         return false;

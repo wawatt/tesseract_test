@@ -7,11 +7,21 @@
 #include <unordered_map>
 #include <set>
 #include <algorithm>
+#include <cmath>
 #include <cctype>
 #include <iostream>
 #include <tinyxml2.h>
 
 namespace vamp_r2000ic {
+
+struct ContactHit {
+    std::string link1;
+    std::string link2;
+    double distance{0.0};
+    double point1[3]{0.0, 0.0, 0.0};
+    double point2[3]{0.0, 0.0, 0.0};
+    double normal[3]{0.0, 0.0, 1.0};
+};
 
 struct ObstacleBox {
     std::string name;
@@ -167,6 +177,22 @@ public:
         return true;
     }
 
+    bool isCollisionAllowed(const std::string& link1, const std::string& link2) const {
+        int idx1 = mapLinkNameToIndex(link1);
+        int idx2 = mapLinkNameToIndex(link2);
+        if (idx1 >= 0 && idx2 >= 0) {
+            if (idx1 > idx2) std::swap(idx1, idx2);
+            return disabled_self_pairs_.find({idx1, idx2}) != disabled_self_pairs_.end();
+        }
+        if (idx1 >= 0 && idx2 < 0) {
+            return (getObstacleExemptMask(link2) & (1u << idx1)) != 0u;
+        }
+        if (idx1 < 0 && idx2 >= 0) {
+            return (getObstacleExemptMask(link1) & (1u << idx2)) != 0u;
+        }
+        return false;
+    }
+
     uint32_t getObstacleExemptMask(const std::string& name) const {
         auto it = obstacle_exempt_masks_.find(name);
         return (it != obstacle_exempt_masks_.end()) ? it->second : 0u;
@@ -206,6 +232,7 @@ public:
             rebuildFlatBoxes();
         }
         if (spheres_.erase(name) > 0) removed = true;
+        obstacle_exempt_masks_.erase(name);
         return removed;
     }
 
@@ -214,6 +241,7 @@ public:
         flat_boxes_.clear();
         flat_box_masks_.clear();
         spheres_.clear();
+        obstacle_exempt_masks_.clear();
     }
 
     void setJointOrigins(const double origins_xyz[18], const double origins_rpy[18], const double axes_xyz[18]) {
@@ -284,6 +312,121 @@ public:
         }
 
         return false;
+    }
+
+    /**
+     * @brief Collision-check a C-space linear interpolation between two 6-DOF configurations.
+     * @return true if the entire segment is collision-free.
+     */
+    bool isMotionValid(const double q1[6], const double q2[6],
+                       float margin = 0.0f, double resolution = 0.05) const {
+        double max_dist = 0.0;
+        for (int i = 0; i < 6; ++i) {
+            max_dist = std::max(max_dist, std::abs(q2[i] - q1[i]));
+        }
+        const double res = std::max(1e-6, resolution);
+        const int steps = std::max(1, static_cast<int>(std::ceil(max_dist / res)));
+        double q[6];
+        for (int s = 0; s <= steps; ++s) {
+            const double a = static_cast<double>(s) / steps;
+            for (int i = 0; i < 6; ++i) {
+                q[i] = (1.0 - a) * q1[i] + a * q2[i];
+            }
+            if (checkCollision(q, margin)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    static const char* linkIndexToName(int idx) {
+        static const char* names[] = {
+            "base_link", "J1_link", "J2_link", "J3_link", "J4_link", "J5_link", "J6_link"
+        };
+        if (idx >= 0 && idx <= 6) return names[idx];
+        return "unknown";
+    }
+
+    /**
+     * @brief Enumerate colliding or near-contact pairs (sphere vs box/sphere, plus self-collision).
+     * @param contact_distance <=0: only overlapping pairs; >0: also pairs closer than this margin.
+     * @return true if any pair was recorded.
+     */
+    bool collectContacts(const double joints[6], std::vector<ContactHit>& out,
+                         double contact_distance = 0.0) const {
+        out.clear();
+        std::vector<Sphere> world_spheres;
+        std::vector<int> sphere_links;
+        kinematics_.computeWorldSpheres(joints, world_spheres, &sphere_links);
+
+        auto push_hit = [&](int link_idx, const std::string& other,
+                            double dist, double x1, double y1, double z1,
+                            double x2, double y2, double z2,
+                            double nx, double ny, double nz) {
+            ContactHit h;
+            h.link1 = linkIndexToName(link_idx);
+            h.link2 = other;
+            h.distance = dist;
+            h.point1[0] = x1; h.point1[1] = y1; h.point1[2] = z1;
+            h.point2[0] = x2; h.point2[1] = y2; h.point2[2] = z2;
+            h.normal[0] = nx; h.normal[1] = ny; h.normal[2] = nz;
+            out.push_back(std::move(h));
+        };
+
+        const double report_thresh = (contact_distance > 0.0) ? contact_distance : 0.0;
+
+        for (const auto& kv : obstacle_boxes_) {
+            const uint32_t mask = getObstacleExemptMask(kv.first);
+            for (const auto& box : kv.second) {
+                for (size_t s = 0; s < world_spheres.size(); ++s) {
+                    const int lid = sphere_links[s];
+                    if (mask != 0 && ((mask >> lid) & 1u)) continue;
+                    const Sphere& sph = world_spheres[s];
+                    float cx = std::clamp(sph.x, box.min.x, box.max.x);
+                    float cy = std::clamp(sph.y, box.min.y, box.max.y);
+                    float cz = std::clamp(sph.z, box.min.z, box.max.z);
+                    float dx = sph.x - cx;
+                    float dy = sph.y - cy;
+                    float dz = sph.z - cz;
+                    float dist_sq = dx * dx + dy * dy + dz * dz;
+                    float dist = (dist_sq > 1e-12f) ? std::sqrt(dist_sq) : 0.0f;
+                    float clearance = dist - sph.r;
+                    if (static_cast<double>(clearance) > report_thresh) continue;
+                    float nx = 0.f, ny = 0.f, nz = 1.f;
+                    if (dist > 1e-6f) {
+                        float inv = 1.0f / dist;
+                        nx = dx * inv; ny = dy * inv; nz = dz * inv;
+                    }
+                    push_hit(lid, kv.first, static_cast<double>(clearance),
+                             sph.x, sph.y, sph.z, cx, cy, cz, nx, ny, nz);
+                }
+            }
+        }
+
+        for (const auto& kv : spheres_) {
+            const uint32_t mask = getObstacleExemptMask(kv.first);
+            const Sphere& obs = kv.second;
+            for (size_t s = 0; s < world_spheres.size(); ++s) {
+                const int lid = sphere_links[s];
+                if (mask != 0 && ((mask >> lid) & 1u)) continue;
+                const Sphere& sph = world_spheres[s];
+                float dx = sph.x - obs.x;
+                float dy = sph.y - obs.y;
+                float dz = sph.z - obs.z;
+                float dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+                float clearance = dist - (sph.r + obs.r);
+                if (static_cast<double>(clearance) > report_thresh) continue;
+                float nx = 0.f, ny = 0.f, nz = 1.f;
+                if (dist > 1e-6f) {
+                    float inv = 1.0f / dist;
+                    nx = dx * inv; ny = dy * inv; nz = dz * inv;
+                }
+                push_hit(lid, kv.first, static_cast<double>(clearance),
+                         sph.x, sph.y, sph.z, obs.x, obs.y, obs.z, nx, ny, nz);
+            }
+        }
+
+        return !out.empty();
     }
 
     /**

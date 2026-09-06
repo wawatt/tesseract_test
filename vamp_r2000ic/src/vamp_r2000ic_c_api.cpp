@@ -79,6 +79,54 @@ int vamp_r2000ic_set_allowed_collision(VampPlannerHandle handle,
     }
 }
 
+int vamp_r2000ic_is_collision_allowed(VampPlannerHandle handle,
+                                      const char* link1,
+                                      const char* link2) {
+    if (!handle || !link1 || !link2) return 0;
+    auto* planner = static_cast<vamp_r2000ic::VampR2000icPlanner*>(handle);
+    try {
+        return planner->isCollisionAllowed(std::string(link1), std::string(link2)) ? 1 : 0;
+    } catch (...) {
+        return 0;
+    }
+}
+
+int vamp_r2000ic_check_collision_detailed(VampPlannerHandle handle,
+                                          const double* joints_6,
+                                          VampContactInfo* out_contacts,
+                                          int max_contacts,
+                                          int* out_count,
+                                          double contact_distance) {
+    if (out_count) *out_count = 0;
+    if (!handle || !joints_6 || !out_contacts || !out_count || max_contacts <= 0) return 0;
+    auto* planner = static_cast<vamp_r2000ic::VampR2000icPlanner*>(handle);
+    try {
+        std::vector<double> q(joints_6, joints_6 + 6);
+        std::vector<vamp_r2000ic::ContactHit> hits;
+        if (!planner->checkCollisionDetailed(q, hits, contact_distance) || hits.empty()) {
+            return 0;
+        }
+        int count = std::min(static_cast<int>(hits.size()), max_contacts);
+        for (int i = 0; i < count; ++i) {
+            const auto& h = hits[static_cast<size_t>(i)];
+            std::strncpy(out_contacts[i].link1, h.link1.c_str(), sizeof(out_contacts[i].link1) - 1);
+            out_contacts[i].link1[sizeof(out_contacts[i].link1) - 1] = '\0';
+            std::strncpy(out_contacts[i].link2, h.link2.c_str(), sizeof(out_contacts[i].link2) - 1);
+            out_contacts[i].link2[sizeof(out_contacts[i].link2) - 1] = '\0';
+            out_contacts[i].distance = h.distance;
+            for (int k = 0; k < 3; ++k) {
+                out_contacts[i].point1[k] = h.point1[k];
+                out_contacts[i].point2[k] = h.point2[k];
+                out_contacts[i].normal[k] = h.normal[k];
+            }
+        }
+        *out_count = count;
+        return 1;
+    } catch (...) {
+        return 0;
+    }
+}
+
 int vamp_r2000ic_add_box(VampPlannerHandle handle,
                          const char* name,
                          double x, double y, double z,

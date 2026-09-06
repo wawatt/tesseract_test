@@ -38,6 +38,16 @@ public:
     typedef int (*FnClearAttachedSpheres)(void*);
     typedef int (*FnLoadSRDF)(void*, const char*);
     typedef int (*FnSetAllowedCollision)(void*, const char*, const char*, int);
+    typedef int (*FnIsCollisionAllowed)(void*, const char*, const char*);
+    struct VampContactC {
+        char link1[64];
+        char link2[64];
+        double distance;
+        double point1[3];
+        double point2[3];
+        double normal[3];
+    };
+    typedef int (*FnCheckCollisionDetailed)(void*, const double*, VampContactC*, int, int*, double);
 
     VampDynamicLoader() = default;
 
@@ -125,6 +135,8 @@ public:
         fnClearAttachedSpheres_ = (FnClearAttachedSpheres)GetProcAddress(hModule_, "vamp_r2000ic_clear_attached_spheres");
         fnLoadSRDF_ = (FnLoadSRDF)GetProcAddress(hModule_, "vamp_r2000ic_load_srdf");
         fnSetAllowedCollision_ = (FnSetAllowedCollision)GetProcAddress(hModule_, "vamp_r2000ic_set_allowed_collision");
+        fnIsCollisionAllowed_ = (FnIsCollisionAllowed)GetProcAddress(hModule_, "vamp_r2000ic_is_collision_allowed");
+        fnCheckCollisionDetailed_ = (FnCheckCollisionDetailed)GetProcAddress(hModule_, "vamp_r2000ic_check_collision_detailed");
 
         if (!fnCreate_ || !fnDestroy_ || !fnInit_ || !fnAddBox_ || !fnRemoveObstacle_ || !fnCheckCollision_ || !fnPlanFreespace_) {
             unload();
@@ -167,6 +179,11 @@ public:
         fnPlanTrajectory_ = nullptr;
         fnParameterize_ = nullptr;
         fnSetJointOrigins_ = nullptr;
+        fnSetLimits_ = nullptr;
+        fnLoadSRDF_ = nullptr;
+        fnSetAllowedCollision_ = nullptr;
+        fnIsCollisionAllowed_ = nullptr;
+        fnCheckCollisionDetailed_ = nullptr;
         fnWarmupRoadmap_ = nullptr;
         fnAddAttachedSpheres_ = nullptr;
         fnRemoveAttachedSpheres_ = nullptr;
@@ -225,6 +242,35 @@ public:
     bool setAllowedCollision(const std::string& link1, const std::string& link2, bool allowed) {
         if (!isLoaded() || !fnSetAllowedCollision_) return false;
         return fnSetAllowedCollision_(handle_, link1.c_str(), link2.c_str(), allowed ? 1 : 0) == 1;
+    }
+
+    bool isCollisionAllowed(const std::string& link1, const std::string& link2) const {
+        if (!isLoaded() || !fnIsCollisionAllowed_) return false;
+        return fnIsCollisionAllowed_(handle_, link1.c_str(), link2.c_str()) == 1;
+    }
+
+    bool checkCollisionDetailed(const std::vector<double>& joints,
+                                std::vector<ContactInfo>& contacts_out,
+                                double contact_distance = 0.0) {
+        contacts_out.clear();
+        if (!isLoaded() || !fnCheckCollisionDetailed_ || joints.size() < 6) return false;
+        const int MAX_C = 64;
+        std::vector<VampContactC> buf(MAX_C);
+        int count = 0;
+        int ret = fnCheckCollisionDetailed_(handle_, joints.data(), buf.data(), MAX_C, &count, contact_distance);
+        if (ret != 1 || count <= 0) return false;
+        contacts_out.reserve(static_cast<size_t>(count));
+        for (int i = 0; i < count; ++i) {
+            ContactInfo info;
+            info.link_name1 = buf[i].link1;
+            info.link_name2 = buf[i].link2;
+            info.distance = buf[i].distance;
+            info.point1 = { buf[i].point1[0], buf[i].point1[1], buf[i].point1[2] };
+            info.point2 = { buf[i].point2[0], buf[i].point2[1], buf[i].point2[2] };
+            info.normal = { buf[i].normal[0], buf[i].normal[1], buf[i].normal[2] };
+            contacts_out.push_back(std::move(info));
+        }
+        return true;
     }
 
     bool addAttachedSpheres(const std::string& name, int link_index, const double* spheres_xyzr, int sphere_count) {
@@ -393,6 +439,8 @@ private:
     FnClearAttachedSpheres fnClearAttachedSpheres_ = nullptr;
     FnLoadSRDF fnLoadSRDF_ = nullptr;
     FnSetAllowedCollision fnSetAllowedCollision_ = nullptr;
+    FnIsCollisionAllowed fnIsCollisionAllowed_ = nullptr;
+    FnCheckCollisionDetailed fnCheckCollisionDetailed_ = nullptr;
 };
 
 } // namespace robot_planner

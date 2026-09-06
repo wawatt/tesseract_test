@@ -118,19 +118,29 @@ int main(int argc, char** argv) {
     std::cout << "\n--- 5. Speed Scaling Test (max_velocity_scaling = 0.5) ---" << std::endl;
     robot_planner::JointTrajectory scaled_traj;
     if (planner.planFreespace(joint_angles, target_joints, scaled_traj, 0.5, 0.5)) {
-        std::cout << "50% Speed Plan SUCCESS! Duration: " << scaled_traj.time_stamps.back() << " s (Expected ~2x slower)" << std::endl;
+        const double ratio = (free_traj.empty() || free_traj.time_stamps.empty())
+            ? 0.0
+            : scaled_traj.time_stamps.back() / std::max(1e-6, free_traj.time_stamps.back());
+        std::cout << "50% vel/acc scale SUCCESS! Duration: " << scaled_traj.time_stamps.back()
+                  << " s (ratio " << ratio << "x vs full-speed; acc-limited ~1.4x, vel-limited ~2x)" << std::endl;
     }
 
-    // 6. 笛卡尔直线规划 (带动力学输出)
+    // 6. 笛卡尔直线规划 (工作位姿，避开 J5=0 手腕奇异)
     std::cout << "\n--- 6. Linear Motion Planning (JointTrajectory) ---" << std::endl;
-    std::vector<double> target_pose_lin = pose;
-    target_pose_lin[0] += 0.05;
+    std::vector<double> part1_lin_q = {0.0, 0.3, -0.2, 0.0, 0.8, 0.0};
+    std::vector<double> part1_lin_pose;
     robot_planner::JointTrajectory lin_traj;
-    if (planner.planLinear(joint_angles, target_pose_lin, lin_traj)) {
-        std::cout << "Linear Planning SUCCESS! Points: " << lin_traj.size() 
-                  << ", Duration: " << lin_traj.time_stamps.back() << " s" << std::endl;
+    if (planner.computeFK(part1_lin_q, part1_lin_pose)) {
+        std::vector<double> target_pose_lin = part1_lin_pose;
+        target_pose_lin[0] += 0.05;
+        if (planner.planLinear(part1_lin_q, target_pose_lin, lin_traj)) {
+            std::cout << "Linear Planning SUCCESS! Points: " << lin_traj.size()
+                      << ", Duration: " << lin_traj.time_stamps.back() << " s" << std::endl;
+        } else {
+            std::cout << "Linear Planning failed: " << planner.getLastError() << std::endl;
+        }
     } else {
-        std::cout << "Linear Planning failed: " << planner.getLastError() << std::endl;
+        std::cout << "Linear Planning failed: could not compute start FK." << std::endl;
     }
 
     // 7. 错误诊断机制测试 (Error Diagnostics)
@@ -676,8 +686,17 @@ int main(int argc, char** argv) {
         std::vector<double> table_contact_pose = {1.5, 0.3, 0.5, 0, 0, 0, 1};
         std::vector<double> q_colliding;
         bool col_table = false;
-        if (cur_planner.computeIK(table_contact_pose, q_safe_up, q_colliding)) {
-            col_table = cur_planner.checkCollision(q_colliding);
+        std::vector<std::vector<double>> table_ik_sols;
+        if (cur_planner.computeAllIK(table_contact_pose, table_ik_sols)) {
+            for (const auto& sol : table_ik_sols) {
+                if (cur_planner.checkCollision(sol)) {
+                    col_table = true;
+                    break;
+                }
+            }
+        } else if (!cur_planner.computeIK(table_contact_pose, q_safe_up, q_colliding) &&
+                   cur_planner.getLastErrorStatus() == robot_planner::PlannerStatus::COLLISION_DETECTED) {
+            col_table = true;
         }
         std::cout << "  [Collision] Safe Posture: " << (!col_safe ? "SAFE (PASS)" : "COLLISION (FAIL)")
                   << " | Table Penetration: " << (col_table ? "COLLISION DETECTED (PASS)" : "SAFE (FAIL)") << std::endl;

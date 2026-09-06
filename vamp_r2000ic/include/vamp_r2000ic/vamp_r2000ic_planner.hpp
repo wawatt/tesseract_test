@@ -53,6 +53,7 @@ public:
      * @return true on success
      */
     bool setAllowedCollision(const std::string& link1, const std::string& link2, bool allowed);
+    bool isCollisionAllowed(const std::string& link1, const std::string& link2) const;
 
     /**
      * @brief Add an Axis-Aligned Bounding Box obstacle into the collision environment.
@@ -85,6 +86,9 @@ public:
      * @return true if collision detected, false if safe.
      */
     bool checkCollision(const std::vector<double>& joints, double safety_margin = 0.025);
+    bool checkCollisionDetailed(const std::vector<double>& joints,
+                                std::vector<ContactHit>& contacts_out,
+                                double contact_distance = 0.0);
 
     /**
      * @brief High-speed motion planning with VAMP SIMD validation and OMPL.

@@ -84,6 +84,34 @@ VAMP_EXPORT int vamp_r2000ic_set_allowed_collision(VampPlannerHandle handle,
                                                    int allowed);
 
 /**
+ * @brief Query whether a link/obstacle pair is on the ACM whitelist.
+ * @return 1 if collision is allowed (ignored), 0 otherwise.
+ */
+VAMP_EXPORT int vamp_r2000ic_is_collision_allowed(VampPlannerHandle handle,
+                                                  const char* link1,
+                                                  const char* link2);
+
+typedef struct VampContactInfo {
+    char link1[64];
+    char link2[64];
+    double distance;
+    double point1[3];
+    double point2[3];
+    double normal[3];
+} VampContactInfo;
+
+/**
+ * @brief Enumerate colliding / near-contact pairs for a 6-DOF configuration.
+ * @return 1 if at least one pair was written, 0 otherwise.
+ */
+VAMP_EXPORT int vamp_r2000ic_check_collision_detailed(VampPlannerHandle handle,
+                                                      const double* joints_6,
+                                                      VampContactInfo* out_contacts,
+                                                      int max_contacts,
+                                                      int* out_count,
+                                                      double contact_distance);
+
+/**
  * @brief Adds an axis-aligned box obstacle.
  * @param handle Planner handle.
  * @param name Obstacle name.

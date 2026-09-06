@@ -135,14 +135,32 @@ bool RobotPlanner::planFreespacePose(const std::vector<double>& start_joints,
         seeds.resize(max_seeds);
     }
 
-    // 2. Try optimizing with each candidate seed (cuRobo multi-seed paradigm)
-    // Avoids TrajOpt getting stuck in a bad local minimum / basin of a single seed!
+    // 2. Nearest seeds first with a shared wall-clock budget (cuRobo multi-seed).
+    // Easy C-space connections return immediately via the VAMP direct-connect path.
     std::string first_failure_reason;
+    double remaining = std::max(0.05, planning_time);
     for (size_t i = 0; i < seeds.size(); ++i) {
+        if (remaining < 0.02) {
+            break;
+        }
+
+        double seed_time;
+        if (i == 0) {
+            seed_time = std::min(remaining, std::max(0.08, planning_time * 0.40));
+        } else if (i == 1) {
+            seed_time = std::min(remaining, std::max(0.08, planning_time * 0.25));
+        } else {
+            seed_time = remaining / static_cast<double>(seeds.size() - i);
+        }
+
+        auto t0 = std::chrono::high_resolution_clock::now();
         JointTrajectory candidate_traj;
         bool ok = planFreespace(start_joints, seeds[i], candidate_traj,
                                 max_velocity_scaling, max_acceleration_scaling,
-                                planning_time, range, safety_margin, collision_coeff, planner_type);
+                                seed_time, range, safety_margin, collision_coeff, planner_type);
+        auto t1 = std::chrono::high_resolution_clock::now();
+        remaining -= std::chrono::duration<double>(t1 - t0).count();
+
         if (ok && !candidate_traj.positions.empty()) {
             std::string reason;
             if (validateTrajectory(candidate_traj, nullptr, &reason)) {
