@@ -56,6 +56,29 @@ int vamp_r2000ic_set_limits(VampPlannerHandle handle,
     }
 }
 
+int vamp_r2000ic_load_srdf(VampPlannerHandle handle, const char* srdf_path) {
+    if (!handle || !srdf_path) return 0;
+    auto* planner = static_cast<vamp_r2000ic::VampR2000icPlanner*>(handle);
+    try {
+        return planner->loadSRDF(std::string(srdf_path)) ? 1 : 0;
+    } catch (...) {
+        return 0;
+    }
+}
+
+int vamp_r2000ic_set_allowed_collision(VampPlannerHandle handle,
+                                       const char* link1,
+                                       const char* link2,
+                                       int allowed) {
+    if (!handle || !link1 || !link2) return 0;
+    auto* planner = static_cast<vamp_r2000ic::VampR2000icPlanner*>(handle);
+    try {
+        return planner->setAllowedCollision(std::string(link1), std::string(link2), allowed != 0) ? 1 : 0;
+    } catch (...) {
+        return 0;
+    }
+}
+
 int vamp_r2000ic_add_box(VampPlannerHandle handle,
                          const char* name,
                          double x, double y, double z,

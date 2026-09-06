@@ -23,6 +23,9 @@ find_package(Eigen3 CONFIG QUIET)
 # Find toppra
 find_package(toppra CONFIG REQUIRED)
 
+# Find tinyxml2
+find_package(tinyxml2 CONFIG REQUIRED)
+
 # vamp_r2000ic Shared Library (DLL)
 add_library(vamp_r2000ic SHARED
     src/vamp_r2000ic_planner.cpp
@@ -48,6 +51,7 @@ target_link_libraries(vamp_r2000ic PUBLIC
     ${OMPL_LIBRARIES}
     ompl::ompl
     toppra::toppra
+    tinyxml2::tinyxml2
 )
 
 # Benchmark / Test executable

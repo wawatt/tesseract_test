@@ -63,6 +63,27 @@ VAMP_EXPORT int vamp_r2000ic_set_limits(VampPlannerHandle handle,
                                         const double* acc_limits);
 
 /**
+ * @brief Parses an SRDF XML file to configure Allowed Collision Matrix (ACM) rules.
+ * @param handle Planner handle.
+ * @param srdf_path Path to SRDF XML file.
+ * @return 1 on success, 0 on failure.
+ */
+VAMP_EXPORT int vamp_r2000ic_load_srdf(VampPlannerHandle handle, const char* srdf_path);
+
+/**
+ * @brief Modifies the Allowed Collision Matrix (ACM) whitelist for two links or obstacles.
+ * @param handle Planner handle.
+ * @param link1 First link or obstacle name.
+ * @param link2 Second link or obstacle name.
+ * @param allowed 1 to exempt from collision, 0 to restore collision testing.
+ * @return 1 on success, 0 on failure.
+ */
+VAMP_EXPORT int vamp_r2000ic_set_allowed_collision(VampPlannerHandle handle,
+                                                   const char* link1,
+                                                   const char* link2,
+                                                   int allowed);
+
+/**
  * @brief Adds an axis-aligned box obstacle.
  * @param handle Planner handle.
  * @param name Obstacle name.

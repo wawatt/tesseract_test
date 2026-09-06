@@ -488,6 +488,11 @@ bool RobotPlanner::setAllowedCollision(const std::string& link1, const std::stri
     auto cmd = std::make_shared<tesseract::environment::ModifyAllowedCollisionsCommand>(
         acm, tesseract::environment::ModifyAllowedCollisionsType::REPLACE);
     bool ok = pimpl_->env_->applyCommand(cmd);
+
+    if (pimpl_->vamp_loader_ && pimpl_->vamp_loader_->isLoaded()) {
+        pimpl_->vamp_loader_->setAllowedCollision(link1, link2, allowed);
+    }
+
     pimpl_->setLastError(ok ? PlannerStatus::SUCCESS : PlannerStatus::INTERNAL_ERROR,
                          ok ? "" : "Failed to apply ModifyAllowedCollisionsCommand.");
     return ok;

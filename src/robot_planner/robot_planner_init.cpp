@@ -124,12 +124,20 @@ bool RobotPlanner::init(const std::string& urdf_path, const std::string& srdf_pa
             pimpl_->backend_ = PlannerBackend::VAMP;
             pimpl_->vamp_loader_->setJointOrigins(pimpl_->joint_origins_xyz_, pimpl_->joint_origins_rpy_, pimpl_->joint_axes_xyz_);
             pimpl_->vamp_loader_->setLimits(pimpl_->joint_vel_limits_, pimpl_->joint_acc_limits_);
-            std::cout << "[RobotPlanner] VAMP Backend activated (AVX2 SIMD, URDF dynamic joint origins injected) -> "
+
+            if (!pimpl_->vamp_loader_->loadSRDF(srdf_path)) {
+                std::cerr << "[RobotPlanner] Error: VAMP failed to load/parse SRDF: " << srdf_path << std::endl;
+                pimpl_->setLastError(PlannerStatus::INVALID_ARGUMENTS, "Failed to load/parse SRDF in VAMP: " + srdf_path);
+                return false;
+            }
+
+            std::cout << "[RobotPlanner] VAMP Backend activated (AVX2 SIMD, URDF dynamic joint origins injected, SRDF ACM loaded) -> "
                       << pimpl_->vamp_loader_->getResolvedPath() << std::endl;
         } else {
             if (backend == PlannerBackend::VAMP) {
-                std::cout << "[RobotPlanner] Notice: VAMP plugin could not be loaded. "
-                          << "Falling back to TESSERACT Backend." << std::endl;
+                pimpl_->setLastError(PlannerStatus::NOT_INITIALIZED, "VAMP plugin could not be loaded.");
+                std::cerr << "[RobotPlanner] Error: VAMP plugin could not be loaded." << std::endl;
+                return false;
             }
         }
     }

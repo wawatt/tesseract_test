@@ -190,8 +190,9 @@ public:
      * @brief Computes world-space positions for all bounding spheres.
      * @param joints 6-element joint angles
      * @param world_spheres output list of spheres in world coordinates
+     * @param sphere_links optional output list of corresponding link indices for each sphere
      */
-    void computeWorldSpheres(const double joints[6], std::vector<Sphere>& world_spheres) const {
+    void computeWorldSpheres(const double joints[6], std::vector<Sphere>& world_spheres, std::vector<int>* sphere_links = nullptr) const {
         std::array<Transform4, NUM_LINKS> link_transforms;
         computeLinkTransforms(joints, link_transforms);
 
@@ -201,11 +202,14 @@ public:
         }
 
         world_spheres.resize(total_count);
+        if (sphere_links) sphere_links->resize(total_count);
+
         for (size_t i = 0; i < local_spheres_.size(); ++i) {
             const auto& ls = local_spheres_[i];
             const auto& t = link_transforms[ls.link_index];
             Point3 wp = t.transformPoint(ls.local_pos);
             world_spheres[i] = Sphere(wp.x, wp.y, wp.z, ls.radius);
+            if (sphere_links) (*sphere_links)[i] = ls.link_index;
         }
 
         size_t cur_idx = local_spheres_.size();
@@ -214,7 +218,9 @@ public:
                 int link_idx = std::clamp(ls.link_index, 0, NUM_LINKS - 1);
                 const auto& t = link_transforms[link_idx];
                 Point3 wp = t.transformPoint(ls.local_pos);
-                world_spheres[cur_idx++] = Sphere(wp.x, wp.y, wp.z, ls.radius);
+                world_spheres[cur_idx] = Sphere(wp.x, wp.y, wp.z, ls.radius);
+                if (sphere_links) (*sphere_links)[cur_idx] = link_idx;
+                cur_idx++;
             }
         }
     }

@@ -95,6 +95,7 @@ public:
 
         // 3. VAMP Collision Cost & Analytic Gradients
         const auto& flat_boxes = collision_checker_.getFlatBoxes();
+        const auto& flat_box_masks = collision_checker_.getFlatBoxMasks();
         const auto& env_spheres = collision_checker_.getSpheres();
         const auto& local_spheres = kinematics_.getLocalSpheres();
         const auto& attached_map = kinematics_.getAttachedSpheres();
@@ -133,7 +134,11 @@ public:
                 Point3 total_force(0.0f, 0.0f, 0.0f);
 
                 // A. Check against AABB boxes
-                for (const auto& box : flat_boxes) {
+                for (size_t b_idx = 0; b_idx < flat_boxes.size(); ++b_idx) {
+                    if (b_idx < flat_box_masks.size() && (flat_box_masks[b_idx] & (1u << link_index))) {
+                        continue; // exempt link!
+                    }
+                    const auto& box = flat_boxes[b_idx];
                     // Find closest point on AABB
                     float cx = std::clamp(wp.x, box.min.x, box.max.x);
                     float cy = std::clamp(wp.y, box.min.y, box.max.y);
@@ -184,6 +189,10 @@ public:
 
                 // B. Check against Environmental Spheres
                 for (const auto& kv : env_spheres) {
+                    uint32_t mask = collision_checker_.getObstacleExemptMask(kv.first);
+                    if (mask != 0 && (mask & (1u << link_index))) {
+                        continue; // exempt link!
+                    }
                     const Sphere& obs = kv.second;
                     float dx = wp.x - obs.x;
                     float dy = wp.y - obs.y;

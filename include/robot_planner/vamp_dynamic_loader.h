@@ -35,6 +35,8 @@ public:
     typedef int (*FnAddAttachedSpheres)(void*, const char*, int, const double*, int);
     typedef int (*FnRemoveAttachedSpheres)(void*, const char*);
     typedef int (*FnClearAttachedSpheres)(void*);
+    typedef int (*FnLoadSRDF)(void*, const char*);
+    typedef int (*FnSetAllowedCollision)(void*, const char*, const char*, int);
 
     VampDynamicLoader() = default;
 
@@ -119,6 +121,8 @@ public:
         fnAddAttachedSpheres_ = (FnAddAttachedSpheres)GetProcAddress(hModule_, "vamp_r2000ic_add_attached_spheres");
         fnRemoveAttachedSpheres_ = (FnRemoveAttachedSpheres)GetProcAddress(hModule_, "vamp_r2000ic_remove_attached_spheres");
         fnClearAttachedSpheres_ = (FnClearAttachedSpheres)GetProcAddress(hModule_, "vamp_r2000ic_clear_attached_spheres");
+        fnLoadSRDF_ = (FnLoadSRDF)GetProcAddress(hModule_, "vamp_r2000ic_load_srdf");
+        fnSetAllowedCollision_ = (FnSetAllowedCollision)GetProcAddress(hModule_, "vamp_r2000ic_set_allowed_collision");
 
         if (!fnCreate_ || !fnDestroy_ || !fnInit_ || !fnAddBox_ || !fnRemoveObstacle_ || !fnCheckCollision_ || !fnPlanFreespace_) {
             unload();
@@ -208,6 +212,16 @@ public:
     bool setLimits(const std::vector<double>& vel_limits, const std::vector<double>& acc_limits) {
         if (!isLoaded() || !fnSetLimits_ || vel_limits.size() < 6 || acc_limits.size() < 6) return false;
         return fnSetLimits_(handle_, vel_limits.data(), acc_limits.data()) == 1;
+    }
+
+    bool loadSRDF(const std::string& srdf_path) {
+        if (!isLoaded() || !fnLoadSRDF_) return false;
+        return fnLoadSRDF_(handle_, srdf_path.c_str()) == 1;
+    }
+
+    bool setAllowedCollision(const std::string& link1, const std::string& link2, bool allowed) {
+        if (!isLoaded() || !fnSetAllowedCollision_) return false;
+        return fnSetAllowedCollision_(handle_, link1.c_str(), link2.c_str(), allowed ? 1 : 0) == 1;
     }
 
     bool addAttachedSpheres(const std::string& name, int link_index, const double* spheres_xyzr, int sphere_count) {
@@ -324,6 +338,8 @@ private:
     FnAddAttachedSpheres fnAddAttachedSpheres_ = nullptr;
     FnRemoveAttachedSpheres fnRemoveAttachedSpheres_ = nullptr;
     FnClearAttachedSpheres fnClearAttachedSpheres_ = nullptr;
+    FnLoadSRDF fnLoadSRDF_ = nullptr;
+    FnSetAllowedCollision fnSetAllowedCollision_ = nullptr;
 };
 
 } // namespace robot_planner

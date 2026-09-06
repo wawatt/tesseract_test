@@ -69,6 +69,22 @@ void VampR2000icPlanner::setJointOrigins(const double origins_xyz[18], const dou
     pimpl_->checker_.setJointOrigins(origins_xyz, origins_rpy, axes_xyz);
 }
 
+bool VampR2000icPlanner::loadSRDF(const std::string& srdf_path) {
+    bool res = pimpl_->checker_.loadSRDF(srdf_path);
+    if (res && pimpl_->persistent_prm_) {
+        pimpl_->persistent_prm_->clearQuery();
+    }
+    return res;
+}
+
+bool VampR2000icPlanner::setAllowedCollision(const std::string& link1, const std::string& link2, bool allowed) {
+    bool res = pimpl_->checker_.setAllowedCollision(link1, link2, allowed);
+    if (res && pimpl_->persistent_prm_) {
+        pimpl_->persistent_prm_->clearQuery();
+    }
+    return res;
+}
+
 void VampR2000icPlanner::warmupRoadmap(double warmup_time) {
     if (!pimpl_->initialized_ || !pimpl_->persistent_prm_) return;
     pimpl_->persistent_prm_->growRoadmap(warmup_time);

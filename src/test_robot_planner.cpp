@@ -164,6 +164,56 @@ int main(int argc, char** argv) {
         std::vector<double> f_start_joints = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
         std::vector<double> f_target_joints = {0.5, 0.3, -0.4, 0.8, 0.2, 0.1};
 
+        // 8.0 VAMP SRDF 动态加载与 ACM 外部白名单位掩码验证
+        std::cout << "\n[8.0] Testing VAMP SRDF Dynamic Loading & ACM Whitelist..." << std::endl;
+        
+        // 8.0.1 严格校验测试：传入不存在的 SRDF，验证 init() 是否严格报错返回 false
+        robot_planner::RobotPlanner invalid_srdf_planner;
+        bool invalid_init_res = invalid_srdf_planner.init(fanuc_urdf, "non_existent.srdf", manip_name, base_link, tool_link, robot_planner::PlannerBackend::VAMP);
+        std::cout << "  - Non-existent SRDF rejected properly? " << (!invalid_init_res ? "Yes (Strict Validation PASS)" : "No (FAIL)") << std::endl;
+        if (!invalid_init_res) {
+            std::cout << "    Reported Error: " << invalid_srdf_planner.getLastError() << std::endl;
+        }
+
+        // 8.0.2 外部障碍物 ACM 白名单验证 (Bitmask 过滤)
+        std::vector<double> zero_pose;
+        fanuc_planner.computeFK(f_start_joints, zero_pose);
+        // 在末端法兰与工具尖端处放置一个小立方体使其与手腕 (tool0 & J5_link) 碰撞
+        fanuc_planner.addBox("vamp_acm_box", zero_pose[0] + 0.05, zero_pose[1], zero_pose[2], 0.1, 0.1, 0.1);
+        bool col_before_acm = fanuc_planner.checkCollision(f_start_joints);
+        std::cout << "  - Collision with 'vamp_acm_box' before ACM whitelist: " 
+                  << (col_before_acm ? "Detected (Expected)" : "Not Detected (FAIL)") << std::endl;
+
+        // 设置白名单：放行手腕区域 (tool0/J6_link 及 J5_link) 与 vamp_acm_box
+        fanuc_planner.setAllowedCollision("tool0", "vamp_acm_box", true);
+        fanuc_planner.setAllowedCollision("J5_link", "vamp_acm_box", true);
+        bool col_after_acm = fanuc_planner.checkCollision(f_start_joints);
+        std::cout << "  - Collision after setting tool0 & J5_link whitelist: " 
+                  << (!col_after_acm ? "Safely Ignored (VAMP Bitmask ACM PASS!)" : "Still Colliding (FAIL)") << std::endl;
+
+        // 恢复碰撞检测
+        fanuc_planner.setAllowedCollision("tool0", "vamp_acm_box", false);
+        fanuc_planner.setAllowedCollision("J5_link", "vamp_acm_box", false);
+        bool col_restored = fanuc_planner.checkCollision(f_start_joints);
+        std::cout << "  - Collision after disabling whitelist: " 
+                  << (col_restored ? "Detected (Restore PASS)" : "Not Detected (FAIL)") << std::endl;
+
+        fanuc_planner.removeObstacle("vamp_acm_box");
+
+        // 8.0.3 机器人自碰撞 ACM 动态配置验证 (SRDF 默认禁用相邻连杆 J5-J6 碰撞)
+        std::cout << "  - Self-collision at default zero posture (SRDF ACM active): "
+                  << (!fanuc_planner.checkCollision(f_start_joints) ? "SAFE (PASS)" : "COLLISION (FAIL)") << std::endl;
+        // 动态强制启用相邻连杆 J5 与 J6 的碰撞检测 -> 由于几何枢轴重叠，必检测出自碰撞
+        fanuc_planner.setAllowedCollision("J5_link", "J6_link", false);
+        bool col_self_enabled = fanuc_planner.checkCollision(f_start_joints);
+        std::cout << "  - Self-collision after re-enabling J5-J6 collision check: "
+                  << (col_self_enabled ? "Detected (Dynamic ACM Toggle PASS)" : "Not Detected (FAIL)") << std::endl;
+        // 恢复 SRDF 设定的允许碰撞
+        fanuc_planner.setAllowedCollision("J5_link", "J6_link", true);
+        bool col_self_restored = fanuc_planner.checkCollision(f_start_joints);
+        std::cout << "  - Self-collision after restoring SRDF disabled state: "
+                  << (!col_self_restored ? "SAFE (Restore PASS)" : "COLLISION (FAIL)") << std::endl;
+
         // 8.1 自由空间规划 (带动力学与时间戳)
         std::cout << "\n[8.1] VAMP Freespace Motion Planning (JointTrajectory)..." << std::endl;
         robot_planner::JointTrajectory f_free_traj;

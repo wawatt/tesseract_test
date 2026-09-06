@@ -39,6 +39,22 @@ public:
     void setLimits(const double vel_limits[6], const double acc_limits[6]);
 
     /**
+     * @brief Load SRDF file to configure Allowed Collision Matrix (ACM).
+     * @param srdf_path Path to SRDF XML file
+     * @return true on success, false on failure
+     */
+    bool loadSRDF(const std::string& srdf_path);
+
+    /**
+     * @brief Modify Allowed Collision Matrix whitelist dynamically.
+     * @param link1 Robot link or obstacle name
+     * @param link2 Robot link or obstacle name
+     * @param allowed true to exempt from collision, false to restore
+     * @return true on success
+     */
+    bool setAllowedCollision(const std::string& link1, const std::string& link2, bool allowed);
+
+    /**
      * @brief Add an Axis-Aligned Bounding Box obstacle into the collision environment.
      * @param name Unique identifier
      * @param cx, cy, cz Box center position in world coords
