@@ -60,6 +60,12 @@ bool RobotPlanner::computeFKForLink(const std::vector<double>& joint_angles, con
     auto transforms = joint_group->calcFwdKin(joints);
     
     std::string target_link = link_name.empty() ? pimpl_->tool_link_ : link_name;
+    if (target_link == pimpl_->base_link_) {
+        pose_out = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0};
+        pimpl_->setLastError(PlannerStatus::SUCCESS, "");
+        return true;
+    }
+
     if (transforms.find(target_link) == transforms.end()) {
         pimpl_->setLastError(PlannerStatus::INTERNAL_ERROR, "Link '" + target_link + "' not found in FK transforms.");
         return false;

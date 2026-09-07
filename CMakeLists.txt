@@ -202,6 +202,10 @@ set_tests_properties(test_robot_planner PROPERTIES ENVIRONMENT "${TESSERACT_TEST
 # Fanuc R-2000iC/165F VAMP SIMD acceleration module
 add_subdirectory(vamp_r2000ic)
 
+# 3D Robot Simulation & Teaching Workstation (Qt5 + OSG)
+add_subdirectory(app)
+
+
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
